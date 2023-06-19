@@ -1,0 +1,136 @@
+class YCL_FORCODE_DBS_LOGIN definition
+  public
+  final
+  create public .
+
+public section.
+*"* public components of class YCL_FORCODE_DBS_LOGIN
+*"* do not include other source files here!!!
+
+  class-methods LOGIN
+    importing
+      value(IV_USERNAME) type YFIN_DBS_DE_UNAME
+      value(IV_PASSWORD) type YFIN_DBS_DE_UPASS
+    exporting
+      !EV_SESSIONID type STRING
+      !EV_SESSIONKEY type STRING .
+protected section.
+*"* protected components of class YCL_FORCODE_DBS_LOGIN
+*"* do not include other source files here!!!
+private section.
+*"* private components of class YCL_FORCODE_DBS_LOGIN
+*"* do not include other source files here!!!
+
+  constants C_URL_LOGIN type STRING value 'https://***/AuthenticationService.svc/Login'. "#EC NOTEXT
+  constants C_ACTION type STRING value '"http://***/IAuthenticationService/Login"'. "#EC NOTEXT
+ENDCLASS.
+
+
+
+CLASS YCL_FORCODE_DBS_LOGIN IMPLEMENTATION.
+
+
+METHOD login.
+
+  DATA: lo_http_client TYPE REF TO if_http_client,
+        lv_value TYPE string,
+        lv_body  TYPE string,
+        lv_bodyx  TYPE xstring,
+        lv_len   TYPE int4,
+        lv_response_bodyx TYPE xstring,
+        lv_body1 TYPE char255,
+        lv_body2 TYPE char255,
+        lv_body3 TYPE char255,
+        lv_url   TYPE string.
+
+  IF YCL_FORCODE_DBS_bank_genel=>deployment_environment( ) EQ YCL_FORCODE_DBS_bank_genel=>mc_env-prod.
+    lv_url = YCL_FORCODE_DBS_bank_kvt=>c_url-login_prod.
+  ELSE.
+    lv_url = YCL_FORCODE_DBS_bank_kvt=>c_url-login_test.
+  ENDIF.
+
+  cl_http_client=>create_by_url( EXPORTING url    = lv_url
+                                 IMPORTING client = lo_http_client ).
+
+  lo_http_client->request->set_header_field( name  = '~request_method'
+                                                value = 'POST' ).
+  lo_http_client->request->set_content_type(
+              content_type = 'application/json'  ).
+
+  lo_http_client->request->set_header_field( name  = 'Content-Type'
+                                             value = 'application/json'  ).
+
+  CONCATENATE
+  '{'
+ 	'"ExtUName" : "' iv_username '",'
+ 	'"ExtUPassword" : "' iv_password '"'
+  '}'
+        INTO lv_body.
+
+  CALL FUNCTION 'SCMS_STRING_TO_XSTRING'
+    EXPORTING
+      text     = lv_body
+*     MIMETYPE = ' '
+*     ENCODING =
+    IMPORTING
+      buffer   = lv_bodyx
+    EXCEPTIONS
+      failed   = 1
+      OTHERS   = 2.
+  IF sy-subrc <> 0.
+* Implement suitable error handling here
+  ENDIF.
+
+  lv_len = xstrlen( lv_bodyx ).
+
+  lo_http_client->request->set_data(
+       EXPORTING
+         data   = lv_bodyx
+         offset = 0
+         length = lv_len ).
+
+  lo_http_client->send( ).
+  lo_http_client->receive(
+                    EXCEPTIONS
+                      http_communication_failure = 1
+                      http_invalid_state = 2
+                      http_processing_failed = 3
+                      OTHERS = 4 ).
+
+  lv_response_bodyx = lo_http_client->response->get_data( ).
+  lo_http_client->close( ).
+
+
+  CLEAR: lv_body.
+  CALL FUNCTION 'ECATT_CONV_XSTRING_TO_STRING'
+    EXPORTING
+      im_xstring = lv_response_bodyx
+*     MIMETYPE   = ' '
+*     ENCODING   =
+    IMPORTING
+      ex_string  = lv_body
+    EXCEPTIONS
+      failed     = 1
+      OTHERS     = 2.
+  IF sy-subrc <> 0.
+* Implement suitable error handling here
+  ENDIF.
+
+
+  CLEAR : lv_body1 ,
+          lv_body2 ,
+          lv_body3 .
+
+  SPLIT lv_body AT '"SessionKey":"' INTO lv_body1 lv_body2.
+  SPLIT lv_body2 AT '"' INTO lv_body1 lv_body2.
+
+  ev_sessionkey = lv_body1.
+
+  REPLACE ALL OCCURRENCES OF '\' IN ev_sessionkey WITH ''.
+
+  SPLIT lv_body AT '"SessionId":"' INTO lv_body1 lv_body2.
+  SPLIT lv_body2 AT '"' INTO lv_body1 lv_body2.
+
+  ev_sessionid = lv_body1.
+ENDMETHOD.
+ENDCLASS.

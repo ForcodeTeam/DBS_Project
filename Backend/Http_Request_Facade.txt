@@ -1,0 +1,181 @@
+class YCL_FORCODE_DBS_HTTP_REQUEST definition
+  public
+  final
+  create public .
+
+public section.
+*"* public components of class YCL_FOCODE_DBS_HTTP_REQUEST
+*"* do not include other source files here!!!
+
+  data REQUEST_BODY type XSTRING .
+  data RESPONSE_TYPE type STRING .
+  data REQUEST_HEADER type XSTRING .
+  data RESPONSE_BODY type XSTRING .
+  data RESPONSE_HEADER type XSTRING .
+  data CNT_TYP type STRING value 'text/xml'. "#EC NOTEXT .
+  data SSL_ID type SSFAPPLSSL value 'ANONYM'. "#EC NOTEXT .
+  data TIMEOUT type I .
+
+  methods START_REQUEST
+    importing
+      value(IM_URL) type STRING
+      value(IM_HTTP_METHOD) type YFIN_DBS_DE_HTTPMETHOD
+      value(IM_SOAP_ACT) type STRING optional
+      value(IM_REQUEST_BODY) type STRING optional
+      value(IM_AUTHENTICATION) type XFELD optional
+      value(IM_USERNAME) type STRING optional
+      value(IM_PASSWORD) type STRING optional
+    exporting
+      value(EX_RESPONSE_BODY) type STRING
+      value(EV_ERROR_MESSAGE) type BAPI_MSG .
+protected section.
+*"* protected components of class YCL_FOCODE_DBS_HTTP_REQUEST
+*"* do not include other source files here!!!
+private section.
+*"* private components of class YCL_FOCODE_DBS_HTTP_REQUEST
+*"* do not include other source files here!!!
+ENDCLASS.
+
+
+
+CLASS YCL_FOCODE_DBS_HTTP_REQUEST IMPLEMENTATION.
+
+
+METHOD start_request.
+
+  DATA: lt_header     TYPE tihttpnvp,
+        ls_header     TYPE ihttpnvp,
+        lr_http       TYPE REF TO if_http_client,
+        lt_header_res TYPE tihttpnvp,
+        ls_header_res TYPE IHTTPNVP
+        .
+
+  CLEAR: lt_header,
+         response_type,
+         request_header,
+         request_body,
+         response_header,
+         response_body,
+         lt_header_res.
+
+  cl_http_client=>create_by_url( EXPORTING
+                                   url                = im_url
+                                   ssl_id             = ssl_id
+                                 IMPORTING
+                                   client             = lr_http
+                                 EXCEPTIONS
+                                   argument_not_found = 1
+                                   plugin_not_active  = 2
+                                   internal_error     = 3  ).
+  IF sy-subrc <> 0.
+*//Message
+    EXIT.
+  ENDIF.
+
+*-&Login işlemleri...
+  IF im_authentication EQ 'X'.
+    lr_http->propertytype_logon_popup =  if_http_client=>co_disabled.
+    CALL METHOD lr_http->authenticate
+      EXPORTING
+        username = im_username
+        password = im_password.
+  ENDIF.
+
+  IF NOT cnt_typ IS INITIAL.
+    ls_header-name  = if_http_header_fields=>content_type.
+    ls_header-value = cnt_typ.
+    APPEND ls_header TO lt_header.
+  ENDIF.
+
+  IF NOT im_soap_act IS INITIAL.
+    ls_header-name = 'SOAPAction'.
+    ls_header-value = im_soap_act.
+    APPEND ls_header TO lt_header.
+  ENDIF.
+
+  ls_header-name = '~request_uri'.
+  ls_header-value = im_url.
+  APPEND ls_header TO lt_header.
+
+  ls_header-name = '~request_method'.
+  CASE im_http_method.
+    WHEN '1'.
+      ls_header-value = 'PUT'.
+    WHEN '2'.
+      ls_header-value = 'GET'.
+    WHEN '3'.
+      ls_header-value = 'POST'.
+  ENDCASE.
+  APPEND ls_header TO lt_header.
+
+*-&Insert header data;
+  lr_http->request->set_header_fields( fields = lt_header ).
+
+*-&Request body data to xstring;
+  CLEAR: request_body.
+  request_body  = cl_proxy_service=>cstring2xstring( im_request_body ).
+
+*-&Insert request body data;
+  IF NOT im_request_body IS INITIAL.
+    lr_http->request->set_data( data = request_body ).
+  ENDIF.
+
+  lr_http->send( EXPORTING
+                   timeout                    = timeout
+                 EXCEPTIONS
+                   http_communication_failure = 1
+                   http_invalid_state         = 2
+                   http_processing_failed     = 3
+                   http_invalid_timeout       = 4 ).
+
+  IF sy-subrc <> 0.
+*//Message
+    CASE sy-subrc.
+      WHEN 1.
+        ev_error_message = 'HTTP_COMMUNICATION_FAILURE'.
+      WHEN 2.
+        ev_error_message = 'HTTP_INVALID_STATE'.
+      WHEN 3.
+        ev_error_message = 'HTTP_PROCESSING_FAILED'.
+      WHEN 4.
+        ev_error_message = 'HTTP_INVALID_TIMEOUT'.
+      WHEN OTHERS.
+    ENDCASE.
+
+    EXIT.
+  ENDIF.
+
+  lr_http->receive(  EXCEPTIONS http_communication_failure = 1
+                                http_invalid_state         = 2
+                                http_processing_failed     = 3 ).
+  IF sy-subrc <> 0.
+*//Message
+    CASE sy-subrc.
+      WHEN 1.
+        ev_error_message = 'HTTP_COMMUNICATION_FAILURE'.
+      WHEN 2.
+        ev_error_message = 'HTTP_INVALID_STATE'.
+      WHEN 3.
+        ev_error_message = 'HTTP_PROCESSING_FAILED'.
+      WHEN OTHERS.
+    ENDCASE.
+
+    EXIT.
+  ENDIF.
+
+  lr_http->response->get_header_fields( CHANGING fields = lt_header_res ).
+
+##TODO_returncode
+
+  CLEAR: response_body.
+  response_body = lr_http->response->get_data( ).
+
+*-&Response body data to string;
+  ex_response_body = cl_proxy_service=>xstring2cstring( response_body ).
+
+  lr_http->close( ).
+  FREE lr_http.
+  CLEAR lr_http.
+
+ENDMETHOD.
+ENDCLASS.

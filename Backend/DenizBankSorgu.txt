@@ -1,0 +1,1256 @@
+class zcl_forcode_DBS_BANK_AND definition
+  public
+  final
+  create public .
+
+public section.
+*"* public components of class zcl_forcode_DBS_BANK_AND
+*"* do not include other source files here!!!
+
+  interfaces ZFORCODE_DBS_BANK .
+protected section.
+*"* protected components of class zcl_forcode_DBS_BANK_AND
+*"* do not include other source files here!!!
+PRIVATE SECTION.
+*"* private components of class zcl_forcode_DBS_BANK_AND
+*"* do not include other source files here!!!
+
+  CONSTANTS c_eftkd TYPE zforcode_de_eftkd VALUE 0135.      "#EC NOTEXT
+
+  CONSTANTS: BEGIN OF c_url,
+               limit         TYPE string VALUE 'https://***/inb/dbs/dbsLimitBilgiSorgula',
+               limit_test    TYPE string VALUE 'https://***/inb/dbs/dbsLimitBilgiSorgula',
+               kayit         TYPE string VALUE 'https://***/inb/dbs/dbsFaturaBilgiGiris',
+               kayit_test    TYPE string VALUE 'https://***/inb/dbs/dbsFaturaBilgiGiris',
+               guncelle      TYPE string VALUE 'https://***/inb/dbs/dbsFaturaVadeGuncelleme',
+               guncelle_test TYPE string VALUE 'https://***/inb/dbs/dbsFaturaVadeGuncelleme',
+               fatura        TYPE string VALUE 'https://***/inb/dbs/dbsFaturaBilgiSorgula',
+               fatura_test   TYPE string VALUE 'https://***/inb/dbs/dbsFaturaBilgiSorgula',
+             END OF c_url.
+
+  CONSTANTS: BEGIN OF c_islemtipi,
+               pesin TYPE string VALUE 'PESIN',
+               ileri TYPE string VALUE 'ILERI',
+             END OF c_islemtipi,
+
+              BEGIN OF c_faturaislemtipi,
+               giris TYPE string VALUE 'GIRIS',
+               iptal TYPE string VALUE 'IPTAL',
+             END OF c_faturaislemtipi.
+ENDCLASS.
+
+
+
+CLASS zcl_forcode_DBS_BANK_AND IMPLEMENTATION.
+
+
+METHOD yif_fin_dbs_bank~fatura_guncelle.
+
+  DATA: ls_banka         TYPE zforcode_s_002,
+        lo_log           TYPE REF TO zcl_forcode_dbs_logger,
+        lv_msg           TYPE bapiret2-message,
+        lv_wrbtr_c       TYPE char16,
+        ls_ileti         TYPE bapiret2
+        .
+
+  DATA:  ls_request         TYPE ty_guncelle_request,
+         ls_response        TYPE ty_guncelle_response,
+         lv_request         TYPE string.
+
+  DATA: lc_http_request  TYPE REF TO zcl_forcode_dbs_http_request,
+        lv_url           TYPE string,
+        lv_username      TYPE string,
+        lv_password      TYPE string,
+        lv_http_method   TYPE zforcode_de_httpmethod,
+        lv_soap_act      TYPE string,
+        lv_response_body TYPE string.
+
+
+  CREATE OBJECT lo_log
+    EXPORTING
+      i_subobj = 'ZFORCODE_DBS'.
+
+  CLEAR:
+   lv_msg,
+   lv_wrbtr_c.
+  WRITE is_fatura-wrbtr TO lv_wrbtr_c CURRENCY is_fatura-waers.
+  CONDENSE lv_wrbtr_c.
+  CONCATENATE 'BUKRS:' is_fatura-bukrs '; '
+              'HBKID:' is_fatura-hbkid '; '
+              'KUNNR:' is_fatura-kunnr '; '
+              'XBLNR:' is_fatura-xblnr '; '
+              'BLDAT:' is_fatura-blart '; '
+              'VDDAT:' is_fatura-vddat '; '
+              'WRBTR:' lv_wrbtr_c      '; '
+              'WAERS:' is_fatura-waers '.'
+         INTO lv_msg RESPECTING BLANKS.
+
+  RAISE EVENT yif_fin_dbs_bank~method_start
+    EXPORTING
+      io_logger = lo_log
+      iv_params = lv_msg.
+
+
+
+  ls_banka = zcl_forcode_dbs_bank_genel=>banka_bilgisi( iv_bukrs  = is_fatura-bukrs
+                                                    iv_eftkd  = c_eftkd ).
+  IF ls_banka-eftkd IS INITIAL.
+    ev_dnskd = 4.
+    ls_ileti-type       = 'E'.
+    ls_ileti-id         = 'ZFORCODE_DBS'.
+    ls_ileti-number     = '002'.
+    ls_ileti-message_v1 = c_eftkd.
+    APPEND ls_ileti TO et_ileti.
+    lo_log->add_log_bapiret2( is_return = ls_ileti ). CLEAR ls_ileti.
+  ELSE.
+
+    CLEAR: ls_request,
+           ls_response.
+
+    CREATE OBJECT lc_http_request.
+
+    CLEAR: lv_url,
+           lv_username,
+           lv_password,
+           lv_http_method,
+           lv_soap_act,
+           lv_response_body.
+
+    ls_request-anafirmahesapno  = ls_banka-frmkd.
+    ls_request-kullaniciadi     = ls_banka-uname.
+    ls_request-kullanicisifre   = ls_banka-upass.
+
+*    ls_request-bayihesapno      = ''.
+    SELECT SINGLE banrf FROM zforcode_t_006
+      INTO ls_request-bayino
+      WHERE bukrs EQ ls_banka-bukrs
+        AND hbkid EQ ls_banka-hbkid
+        AND kunnr EQ is_fatura-kunnr.
+    IF sy-subrc NE 0.
+      CALL FUNCTION 'CONVERSION_EXIT_ALPHA_OUTPUT'
+        EXPORTING
+          input  = is_fatura-kunnr
+        IMPORTING
+          output = ls_request-bayino.
+      CONDENSE ls_request-bayino.
+    ENDIF.
+
+
+
+    ls_request-faturano         = is_fatura-xblnr.
+    ls_request-faturatutar      = is_fatura-wrbtr.
+    CONDENSE ls_request-faturatutar.
+    ls_request-faturatarih      = zcl_forcode_dbs_bank_genel=>tarih_donusturme( iv_tarih_tip = '6'
+                                                                            iv_tarih     = is_fatura-vddat_old ).
+    ls_request-yenifaturatarih  = zcl_forcode_dbs_bank_genel=>tarih_donusturme( iv_tarih_tip = '6'
+                                                                            iv_tarih     = is_fatura-vddat ).
+
+
+    lv_request = zcl_forcode_dbs_json=>serialize( data = ls_request
+                                              pretty_name = zcl_forcode_dbs_json=>pretty_mode-low_case ) .
+
+    IF zcl_forcode_dbs_bank_genel=>deployment_environment( ) EQ zcl_forcode_dbs_bank_genel=>mc_env-prod.
+      lv_url         = c_url-guncelle.
+    ELSE.
+      lv_url         = c_url-guncelle_test.
+    ENDIF.
+
+    lv_http_method = '3'. "*-&Post
+    lv_username    = ls_banka-tokn1.
+    lv_password    = ls_banka-tokn2.
+
+    lc_http_request->cnt_typ = 'application/json'.
+
+
+    lc_http_request->start_request( EXPORTING im_url            = lv_url
+                                              im_http_method    = lv_http_method
+                                              im_soap_act       = lv_soap_act
+                                              im_authentication = 'X'
+                                              im_username       = lv_username
+                                              im_password       = lv_password
+                                              im_request_body   = lv_request
+                                    IMPORTING ex_response_body  = lv_response_body ).
+
+
+    zcl_forcode_dbs_json=>deserialize( EXPORTING json  = lv_response_body
+                                   CHANGING  data  = ls_response ).
+
+    IF ls_response IS NOT INITIAL AND
+       ls_response-islem_sonucu = '000'.
+
+      ls_ileti-type       = 'S'.
+      ls_ileti-id         = 'ZFORCODE_DBS'.
+      ls_ileti-number     = '016'.
+      ls_ileti-message_v1 = ls_response-islem_sonucu.
+      ls_ileti-message_v2 = ls_response-islem_sonucu_aciklama.
+      APPEND ls_ileti TO et_ileti.
+      lo_log->add_log_bapiret2( is_return = ls_ileti ). CLEAR ls_ileti.
+
+      MOVE-CORRESPONDING is_fatura TO es_fatura.
+      es_fatura-bank = 'X'.
+
+
+    ELSEIF ls_response-islem_sonucu IS NOT INITIAL.
+      ev_dnskd = 4.
+      ls_ileti-type       = 'E'.
+      ls_ileti-id         = 'ZFORCODE_DBS'.
+      ls_ileti-number     = '016'.
+      ls_ileti-message_v1 = ls_response-islem_sonucu.
+      ls_ileti-message_v2 = ls_response-islem_sonucu_aciklama.
+      APPEND ls_ileti TO et_ileti.
+      lo_log->add_log_bapiret2( is_return = ls_ileti ). CLEAR ls_ileti.
+    ELSEIF lv_response_body IS INITIAL.
+      ev_dnskd = 4.
+      ls_ileti-type       = 'E'.
+      ls_ileti-id         = 'ZFORCODE_DBS'.
+      ls_ileti-number     = '001'.
+      ls_ileti-message_v1 = 'Servis cevap dönmedi!'.
+      APPEND ls_ileti TO et_ileti.
+      lo_log->add_log_bapiret2( is_return = ls_ileti ). CLEAR ls_ileti.
+    ELSE.
+      ev_dnskd = 4.
+      ls_ileti-type       = 'E'.
+      ls_ileti-id         = 'ZFORCODE_DBS'.
+      ls_ileti-number     = '001'.
+      ls_ileti-message_v1 = 'Anlaşılamayan servis cevabı!'.
+      ls_ileti-message_v2 = lv_response_body.
+      APPEND ls_ileti TO et_ileti.
+      lo_log->add_log_bapiret2( is_return = ls_ileti ). CLEAR ls_ileti.
+    ENDIF.
+
+  ENDIF.
+
+  RAISE EVENT yif_fin_dbs_bank~method_end
+    EXPORTING
+      io_logger = lo_log
+      iv_params = ''.
+
+ENDMETHOD.
+
+
+METHOD yif_fin_dbs_bank~fatura_iptal.
+
+
+  DATA: ls_banka         TYPE zforcode_s_002,
+        lo_log           TYPE REF TO zcl_forcode_dbs_logger,
+        ls_ileti         TYPE bapiret2,
+        lv_msg           type bapiret2-message,
+        lv_wrbtr_c       type char16
+        .
+
+  DATA:  ls_request         TYPE ty_kaydet_request,
+         ls_response        TYPE ty_kaydet_response,
+         lv_request         TYPE string.
+
+  DATA: lc_http_request  TYPE REF TO zcl_forcode_dbs_http_request,
+        lv_url           TYPE string,
+        lv_username      TYPE string,
+        lv_password      TYPE string,
+        lv_http_method   TYPE zforcode_de_httpmethod,
+        lv_soap_act      TYPE string,
+        lv_response_body TYPE string.
+
+
+  CREATE OBJECT lo_log
+    EXPORTING
+      i_subobj = 'ZFORCODE_DBS'.
+
+*  lo_log->create_log( ).
+*
+*  lo_log->add_log( iv_msgid = 'ZFORCODE_DBS'
+*                   iv_msgty = 'S'
+*                   iv_msgno = '006'
+*                   iv_msgv1 = 'AND - Fatura iptal' ).
+  CLEAR:
+   lv_msg,
+   lv_wrbtr_c.
+  WRITE is_fatura-wrbtr TO lv_wrbtr_c CURRENCY is_fatura-waers.
+  CONDENSE lv_wrbtr_c.
+  CONCATENATE 'BUKRS:' is_fatura-bukrs '; '
+              'HBKID:' is_fatura-hbkid '; '
+              'KUNNR:' is_fatura-kunnr '; '
+              'XBLNR:' is_fatura-xblnr '; '
+              'BLDAT:' is_fatura-blart '; '
+              'VDDAT:' is_fatura-vddat '; '
+              'WRBTR:' lv_wrbtr_c      '; '
+              'WAERS:' is_fatura-waers '.'
+         INTO lv_msg RESPECTING BLANKS.
+
+  RAISE EVENT yif_fin_dbs_bank~method_start
+    EXPORTING
+      io_logger = lo_log
+      iv_params = lv_msg.
+
+
+  ls_banka = zcl_forcode_dbs_bank_genel=>banka_bilgisi( iv_bukrs  = is_fatura-bukrs
+                                                    iv_eftkd  = c_eftkd ).
+  IF ls_banka-eftkd IS INITIAL.
+    ev_dnskd = 4.
+    ls_ileti-type       = 'E'.
+    ls_ileti-id         = 'ZFORCODE_DBS'.
+    ls_ileti-number     = '002'.
+    ls_ileti-message_v1 = c_eftkd.
+    APPEND ls_ileti TO et_ileti.
+    lo_log->add_log_bapiret2( is_return = ls_ileti ). CLEAR ls_ileti.
+  ELSE.
+
+    CLEAR: ls_request,
+           ls_response.
+
+    CREATE OBJECT lc_http_request.
+
+    CLEAR: lv_url,
+           lv_username,
+           lv_password,
+           lv_http_method,
+           lv_soap_act,
+           lv_response_body.
+
+    ls_request-anafirmahesapno  = ls_banka-frmkd.
+    ls_request-kullaniciadi     = ls_banka-uname.
+    ls_request-kullanicisifre   = ls_banka-upass.
+
+*    ls_request-bayihesapno      = ''.
+    SELECT SINGLE banrf FROM zforcode_t_006
+      INTO ls_request-bayino
+      WHERE bukrs EQ ls_banka-bukrs
+        AND hbkid EQ ls_banka-hbkid
+        AND kunnr EQ is_fatura-kunnr.
+    IF sy-subrc NE 0.
+      CALL FUNCTION 'CONVERSION_EXIT_ALPHA_OUTPUT'
+        EXPORTING
+          input  = is_fatura-kunnr
+        IMPORTING
+          output = ls_request-bayino.
+      CONDENSE ls_request-bayino.
+    ENDIF.
+
+
+    ls_request-faturano         = is_fatura-xblnr.
+    ls_request-faturaislemtipi  = c_faturaislemtipi-iptal.
+    ls_request-faturaaciklamasi = is_fatura-butxt.
+    ls_request-faturatutar      = is_fatura-wrbtr.
+    CONDENSE ls_request-faturatutar.
+
+    IF is_fatura-bldat EQ is_fatura-vddat.
+      ls_request-islemtipi        = c_islemtipi-pesin.
+    ELSE.
+      ls_request-islemtipi        = c_islemtipi-ileri.
+    ENDIF.
+
+    ls_request-faturadovizcins  = zcl_forcode_dbs_bank_genel=>para_birimi_donustur( iv_hbkid   = ls_banka-hbkid
+                                                                                iv_saptows = 'X'
+                                                                                iv_waers   = is_fatura-waers ).
+    ls_request-faturadzntarih   = zcl_forcode_dbs_bank_genel=>tarih_donusturme( iv_tarih_tip = '6'
+                                                                            iv_tarih     = is_fatura-bldat ).
+    ls_request-faturatarih      = zcl_forcode_dbs_bank_genel=>tarih_donusturme( iv_tarih_tip = '6'
+                                                                            iv_tarih     = is_fatura-vddat ).
+
+
+
+    lv_request = zcl_forcode_dbs_json=>serialize( data = ls_request
+                                              pretty_name = zcl_forcode_dbs_json=>pretty_mode-low_case ) .
+
+    IF zcl_forcode_dbs_bank_genel=>deployment_environment( ) EQ zcl_forcode_dbs_bank_genel=>mc_env-prod.
+      lv_url         = c_url-kayit.
+    ELSE.
+      lv_url         = c_url-kayit_test.
+    ENDIF.
+
+    lv_http_method = '3'. "*-&Post
+    lv_username    = ls_banka-tokn1.
+    lv_password    = ls_banka-tokn2.
+
+    lc_http_request->cnt_typ = 'application/json'.
+
+
+    lc_http_request->start_request( EXPORTING im_url            = lv_url
+                                              im_http_method    = lv_http_method
+                                              im_soap_act       = lv_soap_act
+                                              im_authentication = 'X'
+                                              im_username       = lv_username
+                                              im_password       = lv_password
+                                              im_request_body   = lv_request
+                                    IMPORTING ex_response_body  = lv_response_body ).
+
+
+    zcl_forcode_dbs_json=>deserialize( EXPORTING json  = lv_response_body
+                                   CHANGING  data  = ls_response ).
+
+    IF ls_response IS NOT INITIAL AND
+       ls_response-islem_sonucu = '000'.
+
+      ls_ileti-type       = 'S'.
+      ls_ileti-id         = 'ZFORCODE_DBS'.
+      ls_ileti-number     = '016'.
+      ls_ileti-message_v1 = ls_response-islem_sonucu.
+      ls_ileti-message_v2 = ls_response-islem_sonucu_aciklama.
+      APPEND ls_ileti TO et_ileti.
+      lo_log->add_log_bapiret2( is_return = ls_ileti ). CLEAR ls_ileti.
+
+      MOVE-CORRESPONDING is_fatura TO es_fatura.
+      es_fatura-bank = ''.
+
+
+    ELSEIF ls_response-islem_sonucu IS NOT INITIAL.
+      ev_dnskd = 4.
+      ls_ileti-type       = 'E'.
+      ls_ileti-id         = 'ZFORCODE_DBS'.
+      ls_ileti-number     = '016'.
+      ls_ileti-message_v1 = ls_response-islem_sonucu.
+      ls_ileti-message_v2 = ls_response-islem_sonucu_aciklama.
+      APPEND ls_ileti TO et_ileti.
+      lo_log->add_log_bapiret2( is_return = ls_ileti ). CLEAR ls_ileti.
+    ELSEIF lv_response_body IS INITIAL.
+      ev_dnskd = 4.
+      ls_ileti-type       = 'E'.
+      ls_ileti-id         = 'ZFORCODE_DBS'.
+      ls_ileti-number     = '001'.
+      ls_ileti-message_v1 = 'Servis cevap dönmedi!'.
+      APPEND ls_ileti TO et_ileti.
+      lo_log->add_log_bapiret2( is_return = ls_ileti ).       CLEAR ls_ileti.
+    ELSE.
+      ev_dnskd = 4.
+      ls_ileti-type       = 'E'.
+      ls_ileti-id         = 'ZFORCODE_DBS'.
+      ls_ileti-number     = '001'.
+      ls_ileti-message_v1 = 'Anlaşılamayan servis cevabı!'.
+      ls_ileti-message_v2 = lv_response_body.
+      APPEND ls_ileti TO et_ileti.
+      lo_log->add_log_bapiret2( is_return = ls_ileti ).       CLEAR ls_ileti.
+    ENDIF.
+
+  ENDIF.
+
+
+
+*-&Mesajların listelenmesi
+  LOOP AT et_ileti INTO ls_ileti.
+    CALL FUNCTION 'BALW_BAPIRETURN_GET2'
+      EXPORTING
+        type   = ls_ileti-type
+        cl     = ls_ileti-id
+        number = ls_ileti-number
+        par1   = ls_ileti-message_v1
+        par2   = ls_ileti-message_v2
+        par3   = ls_ileti-message_v3
+        par4   = ls_ileti-message_v4
+      IMPORTING
+        return = ls_ileti.
+    MODIFY et_ileti FROM ls_ileti.
+  ENDLOOP.
+
+*  lo_log->add_log( iv_msgid = 'ZFORCODE_DBS'
+*                   iv_msgty = 'S'
+*                   iv_msgno = '007'
+*                   iv_msgv1 = 'AND - Fatura iptal' ).
+
+  RAISE EVENT yif_fin_dbs_bank~method_end
+    EXPORTING
+      io_logger = lo_log
+      iv_params = ''.
+
+ENDMETHOD.
+
+
+METHOD yif_fin_dbs_bank~fatura_kaydet.
+
+
+  DATA: ls_banka         TYPE zforcode_s_002,
+        lo_log           TYPE REF TO zcl_forcode_dbs_logger,
+        lv_msg           TYPE bapiret2-message,
+        lv_wrbtr_c       TYPE char16,
+        ls_ileti         TYPE bapiret2
+        .
+
+  DATA:  ls_request         TYPE ty_kaydet_request,
+         ls_response        TYPE ty_kaydet_response,
+         lv_request         TYPE string.
+
+  DATA: lc_http_request  TYPE REF TO zcl_forcode_dbs_http_request,
+        lv_url           TYPE string,
+        lv_username      TYPE string,
+        lv_password      TYPE string,
+        lv_http_method   TYPE zforcode_de_httpmethod,
+        lv_soap_act      TYPE string,
+        lv_response_body TYPE string.
+
+
+  CREATE OBJECT lo_log
+    EXPORTING
+      i_subobj = 'ZFORCODE_DBS'.
+
+*  lo_log->create_log( ).
+*
+*  lo_log->add_log( iv_msgid = 'ZFORCODE_DBS'
+*                   iv_msgty = 'S'
+*                   iv_msgno = '006'
+*                   iv_msgv1 = 'AND - Fatura kaydetme' ).
+
+  CLEAR:
+   lv_msg,
+   lv_wrbtr_c.
+  WRITE is_fatura-wrbtr TO lv_wrbtr_c CURRENCY is_fatura-waers.
+  CONDENSE lv_wrbtr_c.
+  CONCATENATE 'BUKRS:' is_fatura-bukrs '; '
+              'HBKID:' is_fatura-hbkid '; '
+              'KUNNR:' is_fatura-kunnr '; '
+              'XBLNR:' is_fatura-xblnr '; '
+              'BLDAT:' is_fatura-blart '; '
+              'VDDAT:' is_fatura-vddat '; '
+              'WRBTR:' lv_wrbtr_c      '; '
+              'WAERS:' is_fatura-waers '.'
+         INTO lv_msg RESPECTING BLANKS.
+
+  RAISE EVENT yif_fin_dbs_bank~method_start
+    EXPORTING
+      io_logger = lo_log
+      iv_params = lv_msg.
+
+
+
+  ls_banka = zcl_forcode_dbs_bank_genel=>banka_bilgisi( iv_bukrs  = is_fatura-bukrs
+                                                    iv_eftkd  = c_eftkd ).
+  IF ls_banka-eftkd IS INITIAL.
+    ev_dnskd = 4.
+    ls_ileti-type       = 'E'.
+    ls_ileti-id         = 'ZFORCODE_DBS'.
+    ls_ileti-number     = '002'.
+    ls_ileti-message_v1 = c_eftkd.
+    APPEND ls_ileti TO et_ileti.
+    lo_log->add_log_bapiret2( is_return = ls_ileti ). CLEAR ls_ileti.
+  ELSE.
+
+    CLEAR: ls_request,
+           ls_response.
+
+    CREATE OBJECT lc_http_request.
+
+    CLEAR: lv_url,
+           lv_username,
+           lv_password,
+           lv_http_method,
+           lv_soap_act,
+           lv_response_body.
+
+    ls_request-anafirmahesapno  = ls_banka-frmkd.
+    ls_request-kullaniciadi     = ls_banka-uname.
+    ls_request-kullanicisifre   = ls_banka-upass.
+
+*    ls_request-bayihesapno      = ''.
+    SELECT SINGLE banrf FROM zforcode_t_006
+      INTO ls_request-bayino
+      WHERE bukrs EQ ls_banka-bukrs
+        AND hbkid EQ ls_banka-hbkid
+        AND kunnr EQ is_fatura-kunnr.
+    IF sy-subrc NE 0.
+      CALL FUNCTION 'CONVERSION_EXIT_ALPHA_OUTPUT'
+        EXPORTING
+          input  = is_fatura-kunnr
+        IMPORTING
+          output = ls_request-bayino.
+      CONDENSE ls_request-bayino.
+    ENDIF.
+
+
+
+    ls_request-faturano         = is_fatura-xblnr.
+    ls_request-faturaislemtipi  = c_faturaislemtipi-giris.
+    ls_request-faturaaciklamasi = is_fatura-butxt.
+    ls_request-faturatutar      = is_fatura-wrbtr.
+    CONDENSE ls_request-faturatutar.
+
+    IF is_fatura-bldat EQ is_fatura-vddat.
+      ls_request-islemtipi        = c_islemtipi-pesin.
+    ELSE.
+      ls_request-islemtipi        = c_islemtipi-ileri.
+    ENDIF.
+
+    ls_request-faturadovizcins  = zcl_forcode_dbs_bank_genel=>para_birimi_donustur( iv_hbkid   = ls_banka-hbkid
+                                                                                iv_saptows = 'X'
+                                                                                iv_waers   = is_fatura-waers ).
+    ls_request-faturadzntarih   = zcl_forcode_dbs_bank_genel=>tarih_donusturme( iv_tarih_tip = '6'
+                                                                            iv_tarih     = is_fatura-bldat ).
+    ls_request-faturatarih      = zcl_forcode_dbs_bank_genel=>tarih_donusturme( iv_tarih_tip = '6'
+                                                                            iv_tarih     = is_fatura-vddat ).
+
+
+
+    lv_request = zcl_forcode_dbs_json=>serialize( data = ls_request
+                                              pretty_name = zcl_forcode_dbs_json=>pretty_mode-low_case ) .
+
+    IF zcl_forcode_dbs_bank_genel=>deployment_environment( ) EQ zcl_forcode_dbs_bank_genel=>mc_env-prod.
+      lv_url         = c_url-kayit.
+    ELSE.
+      lv_url         = c_url-kayit_test.
+    ENDIF.
+
+    lv_http_method = '3'. "*-&Post
+    lv_username    = ls_banka-tokn1.
+    lv_password    = ls_banka-tokn2.
+
+    lc_http_request->cnt_typ = 'application/json'.
+
+
+    lc_http_request->start_request( EXPORTING im_url            = lv_url
+                                              im_http_method    = lv_http_method
+                                              im_soap_act       = lv_soap_act
+                                              im_authentication = 'X'
+                                              im_username       = lv_username
+                                              im_password       = lv_password
+                                              im_request_body   = lv_request
+                                    IMPORTING ex_response_body  = lv_response_body ).
+
+
+    zcl_forcode_dbs_json=>deserialize( EXPORTING json  = lv_response_body
+                                   CHANGING  data  = ls_response ).
+
+    IF ls_response IS NOT INITIAL AND
+       ls_response-islem_sonucu = '000'.
+
+      ls_ileti-type       = 'S'.
+      ls_ileti-id         = 'ZFORCODE_DBS'.
+      ls_ileti-number     = '016'.
+      ls_ileti-message_v1 = ls_response-islem_sonucu.
+      ls_ileti-message_v2 = ls_response-islem_sonucu_aciklama.
+      APPEND ls_ileti TO et_ileti.
+      lo_log->add_log_bapiret2( is_return = ls_ileti ). CLEAR ls_ileti.
+
+      MOVE-CORRESPONDING is_fatura TO es_fatura.
+      es_fatura-bank = 'X'.
+
+
+    ELSEIF ls_response-islem_sonucu IS NOT INITIAL.
+      ev_dnskd = 4.
+      ls_ileti-type       = 'E'.
+      ls_ileti-id         = 'ZFORCODE_DBS'.
+      ls_ileti-number     = '016'.
+      ls_ileti-message_v1 = ls_response-islem_sonucu.
+      ls_ileti-message_v2 = ls_response-islem_sonucu_aciklama.
+      APPEND ls_ileti TO et_ileti.
+      lo_log->add_log_bapiret2( is_return = ls_ileti ). CLEAR ls_ileti.
+    ELSEIF lv_response_body IS INITIAL.
+      ev_dnskd = 4.
+      ls_ileti-type       = 'E'.
+      ls_ileti-id         = 'ZFORCODE_DBS'.
+      ls_ileti-number     = '001'.
+      ls_ileti-message_v1 = 'Servis cevap dönmedi!'.
+      APPEND ls_ileti TO et_ileti.
+      lo_log->add_log_bapiret2( is_return = ls_ileti ). CLEAR ls_ileti.
+    ELSE.
+      ev_dnskd = 4.
+      ls_ileti-type       = 'E'.
+      ls_ileti-id         = 'ZFORCODE_DBS'.
+      ls_ileti-number     = '001'.
+      ls_ileti-message_v1 = 'Anlaşılamayan servis cevabı!'.
+      ls_ileti-message_v2 = lv_response_body.
+      APPEND ls_ileti TO et_ileti.
+      lo_log->add_log_bapiret2( is_return = ls_ileti ). CLEAR ls_ileti.
+    ENDIF.
+
+  ENDIF.
+
+
+
+*-&Mesajların listelenmesi
+  LOOP AT et_ileti INTO ls_ileti.
+    CALL FUNCTION 'BALW_BAPIRETURN_GET2'
+      EXPORTING
+        type   = ls_ileti-type
+        cl     = ls_ileti-id
+        number = ls_ileti-number
+        par1   = ls_ileti-message_v1
+        par2   = ls_ileti-message_v2
+        par3   = ls_ileti-message_v3
+        par4   = ls_ileti-message_v4
+      IMPORTING
+        return = ls_ileti.
+    MODIFY et_ileti FROM ls_ileti.
+  ENDLOOP.
+
+*  lo_log->add_log( iv_msgid = 'ZFORCODE_DBS'
+*                   iv_msgty = 'S'
+*                   iv_msgno = '007'
+*                   iv_msgv1 = 'AND - Fatura kaydetme' ).
+
+  RAISE EVENT yif_fin_dbs_bank~method_end
+  EXPORTING
+    io_logger = lo_log
+    iv_params = ''.
+
+ENDMETHOD.
+
+
+METHOD yif_fin_dbs_bank~sorgula_limit.
+
+  DATA: ls_banka         TYPE zforcode_s_002,
+        lo_log           TYPE REF TO zcl_forcode_dbs_logger,
+        lv_msg           TYPE bapiret2-message,
+        ls_ileti         TYPE bapiret2,
+        ls_limit         TYPE zforcode_t_004
+        .
+
+  DATA:  ls_request       TYPE ty_limit_request,
+         ls_response      TYPE ty_limit_response,
+         ls_limit_bilgisi TYPE ty_limit_bilgisi,
+         lv_request       TYPE string.
+
+  DATA: lc_http_request  TYPE REF TO zcl_forcode_dbs_http_request,
+        lv_url           TYPE string,
+        lv_username      TYPE string,
+        lv_password      TYPE string,
+        lv_http_method   TYPE zforcode_de_httpmethod,
+        lv_soap_act      TYPE string,
+        lv_response_body TYPE string,
+        lv_err           TYPE string.
+
+TYPES : BEGIN OF TYPE_DATA,
+        t_receivers TYPE somlreci1,
+        END OF TYPE_DATA.
+DATA : T_DATA TYPE STANDARD TABLE OF TYPE_DATA.
+DATA : WA TYPE TYPE_DATA.
+DATA : IT_SOLI_TAB TYPE  SOLI_TAB.
+
+  CREATE OBJECT lo_log
+    EXPORTING
+      i_subobj = 'ZFORCODE_DBS'.
+
+*  lo_log->create_log( ).
+*
+*  lo_log->add_log( iv_msgid = 'ZFORCODE_DBS'
+*                   iv_msgty = 'S'
+*                   iv_msgno = '006'
+*                   iv_msgv1 = 'AND - Limit sorgulama' ).
+
+  CLEAR:
+   lv_msg.
+  CONCATENATE 'BUKRS:' is_limit-bukrs '; '
+              'HBKID:' is_limit-hbkid '; '
+              'KUNNR:' is_limit-kunnr '.'
+         INTO lv_msg RESPECTING BLANKS.
+
+  RAISE EVENT yif_fin_dbs_bank~method_start
+    EXPORTING
+      io_logger = lo_log
+      iv_params = lv_msg.
+
+
+  ls_banka = zcl_forcode_dbs_bank_genel=>banka_bilgisi( iv_bukrs  = is_limit-bukrs
+                                                    iv_eftkd  = c_eftkd
+                                                    iv_frmkd  = '' ).
+  IF ls_banka-eftkd IS INITIAL.
+    ev_dnskd = 4.
+    ls_ileti-type       = 'E'.
+    ls_ileti-id         = 'ZFORCODE_DBS'.
+    ls_ileti-number     = '002'.
+    ls_ileti-message_v1 = c_eftkd.
+    APPEND ls_ileti TO et_ileti.
+    lo_log->add_log_bapiret2( is_return = ls_ileti ). CLEAR ls_ileti.
+  ELSE.
+
+    lv_err = 'X'.
+
+    DO 3 TIMES.
+
+
+
+      CLEAR: ls_request,
+             ls_response.
+
+      CREATE OBJECT lc_http_request.
+
+      CLEAR: lv_url,
+             lv_username,
+             lv_password,
+             lv_http_method,
+             lv_soap_act,
+             lv_response_body.
+
+      ls_request-bayihesapno      = ''.
+      ls_request-anafirmahesapno  = ls_banka-frmkd.
+      ls_request-kullaniciadi     = ls_banka-uname.
+      ls_request-kullanicisifre   = ls_banka-upass.
+
+      lv_request = zcl_forcode_dbs_json=>serialize( data = ls_request
+                                                pretty_name = zcl_forcode_dbs_json=>pretty_mode-low_case ) .
+
+
+      IF zcl_forcode_dbs_bank_genel=>deployment_environment( ) EQ zcl_forcode_dbs_bank_genel=>mc_env-prod.
+        lv_url         = c_url-limit.
+      ELSE.
+        lv_url         = c_url-limit_test.
+      ENDIF.
+
+      lv_http_method = '3'. "*-&Post
+      lv_username    = ls_banka-tokn1.
+      lv_password    = ls_banka-tokn2.
+
+      lc_http_request->cnt_typ = 'application/json'.
+
+
+      lc_http_request->start_request( EXPORTING im_url            = lv_url
+                                                im_http_method    = lv_http_method
+                                                im_soap_act       = lv_soap_act
+                                                im_authentication = 'X'
+                                                im_username       = lv_username
+                                                im_password       = lv_password
+                                                im_request_body   = lv_request
+                                      IMPORTING ex_response_body  = lv_response_body ).
+
+
+      zcl_forcode_dbs_json=>deserialize( EXPORTING json  = lv_response_body
+                                     CHANGING  data  = ls_response ).
+
+      IF ls_response IS NOT INITIAL AND
+         ls_response-islem_sonucu = '000'.
+
+        ls_ileti-type       = 'S'.
+        ls_ileti-id         = 'ZFORCODE_DBS'.
+        ls_ileti-number     = '016'.
+        ls_ileti-message_v1 = ls_response-islem_sonucu.
+        ls_ileti-message_v2 = ls_response-islem_sonucu_aciklama.
+        APPEND ls_ileti TO et_ileti.
+        lo_log->add_log_bapiret2( is_return = ls_ileti ). CLEAR ls_ileti.
+
+        CLEAR et_limit.
+        LOOP AT ls_response-limit_bilgileri INTO ls_limit_bilgisi.
+          CLEAR ls_limit.
+
+          ls_limit-bukrs = ls_banka-bukrs.
+          ls_limit-hbkid = ls_banka-hbkid.
+
+          SELECT SINGLE kunnr FROM zforcode_t_006
+                              INTO ls_limit-kunnr
+                             WHERE bukrs = ls_banka-bukrs
+                               AND hbkid = ls_banka-hbkid
+                               AND banrf = ls_limit_bilgisi-bayi_no.
+          IF sy-subrc NE 0.
+            ls_limit-kunnr = ls_limit_bilgisi-bayi_no.
+            CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+              EXPORTING
+                input  = ls_limit-kunnr
+              IMPORTING
+                output = ls_limit-kunnr.
+          ENDIF.
+
+          ls_limit-bnwaers = zcl_forcode_dbs_bank_genel=>para_birimi_donustur( iv_hbkid = ls_banka-hbkid
+                                                                           iv_waers = ls_limit_bilgisi-bayi_hesap_doviz_cins ).
+          ls_limit-bnlimit = ls_limit_bilgisi-dbs_limiti.
+          ls_limit-kklimit = ls_limit_bilgisi-kalan_dbs_limiti.
+*        ls_limit-kllimit = ls_limit_bilgisi-kalan_dbs_limiti.
+          ls_limit-kllimit = ls_limit_bilgisi-fatura_limiti.
+          ls_limit-vglimit = ls_limit_bilgisi-odenmeyen_fatura_tutari.
+
+          ls_limit-aenam   = sy-uname.
+          ls_limit-aedat   = sy-datum.
+          ls_limit-aezeit  = sy-uzeit.
+
+          APPEND ls_limit TO et_limit.
+          CLEAR lv_err.
+        ENDLOOP.
+
+
+      ELSEIF ls_response-islem_sonucu IS NOT INITIAL.
+        ev_dnskd = 4.
+        ls_ileti-type       = 'E'.
+        ls_ileti-id         = 'ZFORCODE_DBS'.
+        ls_ileti-number     = '016'.
+        ls_ileti-message_v1 = ls_response-islem_sonucu.
+        ls_ileti-message_v2 = ls_response-islem_sonucu_aciklama.
+        APPEND ls_ileti TO et_ileti.
+        lo_log->add_log_bapiret2( is_return = ls_ileti ). CLEAR ls_ileti.
+      ELSEIF lv_response_body IS INITIAL.
+        ev_dnskd = 4.
+        ls_ileti-type       = 'E'.
+        ls_ileti-id         = 'ZFORCODE_DBS'.
+        ls_ileti-number     = '001'.
+        ls_ileti-message_v1 = 'Servis cevap dönmedi!'.
+        APPEND ls_ileti TO et_ileti.
+        lo_log->add_log_bapiret2( is_return = ls_ileti ).  CLEAR ls_ileti.
+      ELSE.
+        ev_dnskd = 4.
+        ls_ileti-type       = 'E'.
+        ls_ileti-id         = 'ZFORCODE_DBS'.
+        ls_ileti-number     = '001'.
+        ls_ileti-message_v1 = 'Anlaşılamayan servis cevabı!'.
+        ls_ileti-message_v2 = lv_response_body.
+        APPEND ls_ileti TO et_ileti.
+        lo_log->add_log_bapiret2( is_return = ls_ileti ).  CLEAR ls_ileti.
+      ENDIF.
+**
+      IF ls_response-islem_sonucu <> '000'.
+        WAIT UP TO 60 SECONDS.
+      ELSE.
+        EXIT.
+      ENDIF.
+**
+*--   dönüş kodu 999 ise tekrar dene max 3
+*      IF ls_response-islem_sonucu NE '999'.
+*        EXIT.
+*      ENDIF.
+
+    ENDDO. " 3 kere dene
+
+  ENDIF.
+
+
+
+*-&Mesajların listelenmesi
+  LOOP AT et_ileti INTO ls_ileti.
+    CALL FUNCTION 'BALW_BAPIRETURN_GET2'
+      EXPORTING
+        type   = ls_ileti-type
+        cl     = ls_ileti-id
+        number = ls_ileti-number
+        par1   = ls_ileti-message_v1
+        par2   = ls_ileti-message_v2
+        par3   = ls_ileti-message_v3
+        par4   = ls_ileti-message_v4
+      IMPORTING
+        return = ls_ileti.
+    MODIFY et_ileti FROM ls_ileti.
+  ENDLOOP.
+
+*  lo_log->add_log( iv_msgid = 'ZFORCODE_DBS'
+*                   iv_msgty = 'S'
+*                   iv_msgno = '007'
+*                   iv_msgv1 = 'AND - Limit sorgulama' ).
+
+  RAISE EVENT yif_fin_dbs_bank~method_end
+    EXPORTING
+      io_logger = lo_log
+      iv_params = ''.
+
+******************************************************************
+*mail gönderimi
+
+* Add the recipients email address
+ IF lv_err = 'X'.
+  CLEAR t_data.
+  REFRESH t_data.
+
+  wa-t_receivers-receiver = 'HASAN.ANBARLI@YUCELGRUP.COM'.
+  wa-t_receivers-rec_type = 'U'.
+  wa-t_receivers-com_type = 'INT'.
+  wa-t_receivers-notif_del = 'X'.
+  wa-t_receivers-notif_ndel = 'X'.
+  APPEND wa TO T_DATA.
+
+
+    CALL FUNCTION 'Z_MAIL_GONDER'
+      EXPORTING
+        i_sender            = 'DTSLIMIT@YUCELGRUP.COM'
+        i_subject           = 'AND02 WEBSERVIS LİMİT HATASI'
+*      I_STRING            =
+*      I_TIP               =
+        i_immed             = ' '
+*    IMPORTING
+*      E_MESSAGE           =
+      TABLES
+        it_soli_tab         = it_soli_tab
+        it_recepient        = t_data
+*      IT_CC               =
+*      IT_BCC              =
+*      IT_ATTACHMENT       =
+              .
+  ENDIF.
+*******************************************************************
+
+ENDMETHOD.
+
+
+METHOD yif_fin_dbs_bank~sorgula_tahsilat.
+
+
+  DATA: ls_banka         TYPE zforcode_s_002,
+        lo_log           TYPE REF TO zcl_forcode_dbs_logger,
+        lv_msg           TYPE bapiret2-message,
+        ls_ileti         TYPE bapiret2,
+        ls_tahsilat      TYPE zforcode_s_005,
+        lv_tahsilat_tarih TYPE datum
+        .
+
+  DATA:  ls_request         TYPE ty_fatura_request,
+         ls_response        TYPE ty_fatura_response,
+         ls_fatura_bilgisi  TYPE ty_fatura_bilgisi,
+         ls_temp_fatura_bilgisi TYPE ty_fatura_bilgisi,
+         lv_temp_fatura_bilgisi TYPE ty_fatura_bilgisi,
+         ls_temp_response   TYPE ty_fatura_response,
+         lv_request         TYPE string.
+
+  DATA: lc_http_request  TYPE REF TO zcl_forcode_dbs_http_request,
+        lv_url           TYPE string,
+        lv_username      TYPE string,
+        lv_password      TYPE string,
+        lv_http_method   TYPE zforcode_de_httpmethod,
+        lv_soap_act      TYPE string,
+        lv_response_body TYPE string.
+
+
+  CREATE OBJECT lo_log
+    EXPORTING
+      i_subobj = 'ZFORCODE_DBS'.
+
+*  lo_log->create_log( ).
+*
+*  lo_log->add_log( iv_msgid = 'ZFORCODE_DBS'
+*                   iv_msgty = 'S'
+*                   iv_msgno = '006'
+*                   iv_msgv1 = 'AND - Tahsilat sorgulama' ).
+
+  CLEAR:
+   lv_msg.
+  CONCATENATE 'BUKRS:' iv_bukrs '; '
+              'KUNNR:' iv_bayin '; '
+              'DATUM_START:' iv_datum_start '; '
+              'DATUM_END:' iv_datum_end '.'
+         INTO lv_msg RESPECTING BLANKS.
+
+  RAISE EVENT yif_fin_dbs_bank~method_start
+    EXPORTING
+      io_logger = lo_log
+      iv_params = lv_msg.
+
+
+
+  ls_banka = zcl_forcode_dbs_bank_genel=>banka_bilgisi( iv_bukrs  = iv_bukrs
+                                                    iv_eftkd  = c_eftkd ).
+  IF ls_banka-eftkd IS INITIAL.
+    ev_dnskd = 4.
+    ls_ileti-type       = 'E'.
+    ls_ileti-id         = 'ZFORCODE_DBS'.
+    ls_ileti-number     = '002'.
+    ls_ileti-message_v1 = c_eftkd.
+    APPEND ls_ileti TO et_ileti.
+    lo_log->add_log_bapiret2( is_return = ls_ileti ). CLEAR ls_ileti.
+  ELSE.
+
+    CLEAR: ls_request,
+           ls_response.
+
+    CREATE OBJECT lc_http_request.
+
+    CLEAR: lv_url,
+           lv_username,
+           lv_password,
+           lv_http_method,
+           lv_soap_act,
+           lv_response_body.
+
+    ls_request-bayihesapno      = ''.
+    ls_request-anafirmahesapno  = ls_banka-frmkd.
+    ls_request-kullaniciadi     = ls_banka-uname.
+    ls_request-kullanicisifre   = ls_banka-upass.
+
+    IF iv_datum_start IS NOT INITIAL.
+      ls_request-faturabsltarih   =  zcl_forcode_dbs_bank_genel=>tarih_donusturme( iv_tarih_tip = '6'
+                                                                               iv_tarih     = iv_datum_start  ).
+    ENDIF.
+
+    IF iv_datum_end IS NOT INITIAL.
+      ls_request-faturabittarih   =  zcl_forcode_dbs_bank_genel=>tarih_donusturme( iv_tarih_tip = '6'
+                                                                               iv_tarih     = iv_datum_end  ).
+    ENDIF.
+
+
+
+    lv_request = zcl_forcode_dbs_json=>serialize( data = ls_request
+                                              pretty_name = zcl_forcode_dbs_json=>pretty_mode-low_case ) .
+
+
+    IF zcl_forcode_dbs_bank_genel=>deployment_environment( ) EQ zcl_forcode_dbs_bank_genel=>mc_env-prod.
+      lv_url         = c_url-fatura.
+    ELSE.
+      lv_url         = c_url-fatura_test.
+    ENDIF.
+
+    lv_http_method = '3'. "*-&Post
+    lv_username    = ls_banka-tokn1.
+    lv_password    = ls_banka-tokn2.
+
+    lc_http_request->cnt_typ = 'application/json'.
+
+
+    lc_http_request->start_request( EXPORTING im_url            = lv_url
+                                              im_http_method    = lv_http_method
+                                              im_soap_act       = lv_soap_act
+                                              im_authentication = 'X'
+                                              im_username       = lv_username
+                                              im_password       = lv_password
+                                              im_request_body   = lv_request
+                                    IMPORTING ex_response_body  = lv_response_body ).
+
+
+    zcl_forcode_dbs_json=>deserialize( EXPORTING json  = lv_response_body
+                                   CHANGING  data  = ls_response ).
+
+    IF ls_response IS NOT INITIAL AND
+       ls_response-islem_sonucu = '000'.
+
+      ls_ileti-type       = 'S'.
+      ls_ileti-id         = 'ZFORCODE_DBS'.
+      ls_ileti-number     = '016'.
+      ls_ileti-message_v1 = ls_response-islem_sonucu.
+      ls_ileti-message_v2 = ls_response-islem_sonucu_aciklama.
+      APPEND ls_ileti TO et_ileti.
+      lo_log->add_log_bapiret2( is_return = ls_ileti ). CLEAR ls_ileti.
+
+      CLEAR et_tahsilat.
+
+*-> begin - ETUNC / 29.12.2020
+*      SORT ls_response-fatura_bilgileri by fatura_no ASCENDING
+*                                           fatura_tahsilat_tarih DESCENDING
+*                                           fatura_tahsilat_tutar DESCENDING.
+*     DELETE ADJACENT DUPLICATES FROM ls_response-fatura_bilgileri COMPARING fatura_no.
+*<- end   - ETUNC / 29.12.2020
+
+TYPES: BEGIN OF my_data,
+         fatura_no TYPE STRING,
+       END OF my_data.
+
+      DATA   : mt_data   TYPE STANDARD TABLE OF my_data.
+      DATA   : ms_data   TYPE my_data.
+*
+       LOOP AT ls_response-fatura_bilgileri INTO ls_fatura_bilgisi.
+         IF ls_fatura_bilgisi-fatura_odeme_tipi = 'HATALI'.
+           DELETE ls_response-fatura_bilgileri.
+         ENDIF.
+       ENDLOOP.
+*
+      LOOP AT ls_response-fatura_bilgileri INTO ls_fatura_bilgisi.
+        LOOP AT mt_data INTO ms_data WHERE fatura_no = ls_fatura_bilgisi-fatura_no.
+          DELETE ls_response-fatura_bilgileri.
+        ENDLOOP.
+        IF sy-subrc <> 0.
+          CLEAR: ms_data.
+          ms_data-fatura_no = ls_fatura_bilgisi-fatura_no.
+          APPEND ms_data TO mt_data.
+        ENDIF.
+      ENDLOOP.
+*
+      LOOP AT ls_response-fatura_bilgileri INTO ls_fatura_bilgisi.
+        CLEAR ls_tahsilat.
+
+        ls_tahsilat-eftkd = ls_banka-eftkd.
+        ls_tahsilat-bukrs = ls_banka-bukrs.
+        ls_tahsilat-hbkid = ls_banka-hbkid.
+        ls_tahsilat-xblnr = ls_fatura_bilgisi-fatura_no.
+
+        SELECT SINGLE kunnr FROM zforcode_t_006
+                            INTO ls_tahsilat-kunnr
+                           WHERE bukrs = ls_banka-bukrs
+                             AND hbkid = ls_banka-hbkid
+                             AND banrf = ls_fatura_bilgisi-bayi_no.
+        IF sy-subrc NE 0.
+          ls_tahsilat-kunnr = ls_fatura_bilgisi-bayi_no.
+          CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+            EXPORTING
+              input  = ls_tahsilat-kunnr
+            IMPORTING
+              output = ls_tahsilat-kunnr.
+        ENDIF.
+
+        ls_tahsilat-waers_giden = zcl_forcode_dbs_bank_genel=>para_birimi_donustur( iv_hbkid = ls_banka-hbkid
+                                                                                iv_waers = ls_fatura_bilgisi-fatura_doviz_cins ).
+        ls_tahsilat-wrbtr_giden = ls_fatura_bilgisi-fatura_tutar.
+        ls_tahsilat-vddat       = zcl_forcode_dbs_bank_genel=>tarih_donusturme( iv_tarih_tip = '7'
+                                                                            iv_tarih     = ls_fatura_bilgisi-fatura_tarih  ).
+
+
+        IF ls_fatura_bilgisi-fatura_tahsilat_tutar IS NOT INITIAL.
+          ls_tahsilat-wrbtr_tah   = ls_fatura_bilgisi-fatura_tahsilat_tutar.
+*-> begin - ETUNC / 22.07.2022
+*          ls_tahsilat-waers_tah   = ls_tahsilat-waers_giden.
+          ls_tahsilat-waers_tah   = zcl_forcode_dbs_bank_genel=>para_birimi_donustur( iv_hbkid = ls_banka-hbkid
+                                                                                  iv_waers = ls_fatura_bilgisi-tahsilat_doviz_cins ).
+*<- end   - ETUNC / 22.07.2022
+
+          lv_tahsilat_tarih       = zcl_forcode_dbs_bank_genel=>tarih_donusturme( iv_tarih_tip = '7'
+                                                                              iv_tarih     = ls_fatura_bilgisi-fatura_tahsilat_tarih ).
+          IF ls_tahsilat-vddat > lv_tahsilat_tarih..
+            ls_tahsilat-vddat = lv_tahsilat_tarih.
+          ENDIF.
+        ENDIF.
+
+        CASE ls_fatura_bilgisi-fatura_odeme_tipi.
+          WHEN 'ODENDI'.
+            ls_tahsilat-islem = '91'.  "ödendi
+          WHEN 'HATALI'.
+            ls_tahsilat-islem = '85' . " iptal
+            CONTINUE.
+          WHEN 'IPTAL'.
+            ls_tahsilat-islem = '85' . " iptal
+          WHEN 'ODENMEDI'.
+            ls_tahsilat-islem = '85' . " vade tarihinde ödenemedi
+          WHEN 'TAHSILATI GERCEKLESMEMISLER'.
+            ls_tahsilat-islem = '80' . " bekliyor
+          WHEN 'KISMI' or 'KISMI ODENDI'.
+            ls_tahsilat-islem = '91'.  " kısmi ödendi
+        ENDCASE.
+
+        APPEND ls_tahsilat TO et_tahsilat.
+      ENDLOOP.
+
+
+
+    ELSEIF ls_response-islem_sonucu IS NOT INITIAL.
+      ev_dnskd = 4.
+      ls_ileti-type       = 'E'.
+      ls_ileti-id         = 'ZFORCODE_DBS'.
+      ls_ileti-number     = '016'.
+      ls_ileti-message_v1 = ls_response-islem_sonucu.
+      ls_ileti-message_v2 = ls_response-islem_sonucu_aciklama.
+      APPEND ls_ileti TO et_ileti.
+      lo_log->add_log_bapiret2( is_return = ls_ileti ). CLEAR ls_ileti.
+    ELSEIF lv_response_body IS INITIAL.
+      ev_dnskd = 4.
+      ls_ileti-type       = 'E'.
+      ls_ileti-id         = 'ZFORCODE_DBS'.
+      ls_ileti-number     = '001'.
+      ls_ileti-message_v1 = 'Servis cevap dönmedi!'.
+      APPEND ls_ileti TO et_ileti.
+      lo_log->add_log_bapiret2( is_return = ls_ileti ).       CLEAR ls_ileti.
+    ELSE.
+      ev_dnskd = 4.
+      ls_ileti-type       = 'E'.
+      ls_ileti-id         = 'ZFORCODE_DBS'.
+      ls_ileti-number     = '001'.
+      ls_ileti-message_v1 = 'Anlaşılamayan servis cevabı!'.
+      ls_ileti-message_v2 = lv_response_body.
+      APPEND ls_ileti TO et_ileti.
+      lo_log->add_log_bapiret2( is_return = ls_ileti ).       CLEAR ls_ileti.
+    ENDIF.
+
+  ENDIF.
+
+
+
+*-&Mesajların listelenmesi
+  LOOP AT et_ileti INTO ls_ileti.
+    CALL FUNCTION 'BALW_BAPIRETURN_GET2'
+      EXPORTING
+        type   = ls_ileti-type
+        cl     = ls_ileti-id
+        number = ls_ileti-number
+        par1   = ls_ileti-message_v1
+        par2   = ls_ileti-message_v2
+        par3   = ls_ileti-message_v3
+        par4   = ls_ileti-message_v4
+      IMPORTING
+        return = ls_ileti.
+    MODIFY et_ileti FROM ls_ileti.
+  ENDLOOP.
+
+*  lo_log->add_log( iv_msgid = 'ZFORCODE_DBS'
+*                   iv_msgty = 'S'
+*                   iv_msgno = '007'
+*                   iv_msgv1 = 'AND - Tahsilat sorgulama' ).
+
+  RAISE EVENT yif_fin_dbs_bank~method_end
+    EXPORTING
+      io_logger = lo_log
+      iv_params = ''.
+
+
+ENDMETHOD.
+ENDCLASS.
