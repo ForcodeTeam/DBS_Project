@@ -1,0 +1,1262 @@
+class YCL_FORCODE_DBS_BANK_ZRT definition
+  public
+  final
+  create public .
+
+public section.
+*"* public components of class YCL_FORCODE_DBS_BANK_ZRT
+*"* do not include other source files here!!!
+
+  interfaces yif_forcode_dbs_BANK .
+protected section.
+*"* protected components of class YCL_FORCODE_DBS_BANK_ZRT
+*"* do not include other source files here!!!
+private section.
+*"* private components of class YCL_FORCODE_DBS_BANK_ZRT
+*"* do not include other source files here!!!
+
+  constants C_EFTKD type ZFORCODE_DBS_DE_EFTKD value 0010. "#EC NOTEXT
+ENDCLASS.
+
+
+
+CLASS YCL_FORCODE_DBS_BANK_ZRT IMPLEMENTATION.
+
+
+METHOD yif_forcode_dbs_bank~fatura_guncelle.
+
+  DATA:
+     lo_proxy  TYPE REF TO ZFORCODE_DBS_zrt_co_dbsproxy_wssoa,
+     ls_input  TYPE ZFORCODE_DBS_zrt_fatura_yukle_soa1,
+     ls_output TYPE ZFORCODE_DBS_zrt_fatura_yukle_soap,
+*     lt_message TYPE ZFORCODE_DBS_ing_data_table1_tab,
+*     ls_message TYPE ZFORCODE_DBS_ing_data_table1,
+*     lt_detail TYPE ZFORCODE_DBS_ZRT_LIMIT_CEVAP,
+     ls_detail TYPE ZFORCODE_DBS_zrt_fatura_cevap,
+     lx_sys_fault  TYPE REF TO cx_ai_system_fault,
+     lx_app_fault  TYPE REF TO cx_ai_application_fault.
+
+*  DATA: ls_invoice TYPE ty_invoice,
+*        ev_dnskd   TYPE i,
+*        et_ileti   TYPE bapiret2_t ,
+  DATA: ls_banka   TYPE ZFORCODE_DBS_s_002,
+        ls_ileti   TYPE bapiret2.
+
+  DATA:
+    lo_log      TYPE REF TO YCL_FORCODE_DBS_logger,
+    lv_msg      TYPE bapiret2-message,
+    lv_wrbtr_c  TYPE char16.
+
+  DEFINE _catch_error.
+    ev_dnskd = 4.
+    ls_ileti-type       = 'E'.
+    ls_ileti-id         = 'ZFORCODE_DBS'.
+    ls_ileti-number     = '001'.
+
+    clear lv_msg.
+    lv_msg = &1->get_text( ).
+    ls_ileti-message_v1 = lv_msg+000(050).
+    ls_ileti-message_v2 = lv_msg+050(050).
+    ls_ileti-message_v3 = lv_msg+100(050).
+    ls_ileti-message_v4 = lv_msg+150(050).
+    append ls_ileti to et_ileti.
+    lo_log->add_log_bapiret2( ls_ileti ). clear ls_ileti.
+  END-OF-DEFINITION.
+
+
+
+
+
+  CREATE OBJECT lo_log
+    EXPORTING
+      i_subobj = 'ZFORCODE_DBS'.
+
+*  lo_log->create_log( ).
+*
+*  lo_log->add_log( iv_msgid = 'ZFORCODE_DBS'
+*                   iv_msgty = 'S'
+*                   iv_msgno = '006'
+*                   iv_msgv1 = 'ZRT - Fatura Güncelleme' ).
+  CLEAR:
+   lv_msg,
+   lv_wrbtr_c.
+  WRITE is_fatura-wrbtr TO lv_wrbtr_c CURRENCY is_fatura-waers.
+  CONDENSE lv_wrbtr_c.
+  CONCATENATE 'BUKRS:' is_fatura-bukrs '; '
+              'HBKID:' is_fatura-hbkid '; '
+              'KUNNR:' is_fatura-kunnr '; '
+              'XBLNR:' is_fatura-xblnr '; '
+              'BLDAT:' is_fatura-blart '; '
+              'VDDAT:' is_fatura-vddat '; '
+              'WRBTR:' lv_wrbtr_c      '; '
+              'WAERS:' is_fatura-waers '.'
+         INTO lv_msg RESPECTING BLANKS.
+
+  RAISE EVENT yif_forcode_dbs_bank~method_start
+    EXPORTING
+      io_logger = lo_log
+      iv_params = lv_msg.
+
+
+
+  CREATE OBJECT lo_proxy.
+  CHECK lo_proxy IS BOUND.
+
+  ls_banka = YCL_FORCODE_DBS_bank_genel=>banka_bilgisi(
+      iv_bukrs  = is_fatura-bukrs
+      iv_eftkd  = c_eftkd
+      iv_frmkd  = '' ).
+
+  IF ls_banka-eftkd IS INITIAL.
+    ls_ileti-type       = 'E'.
+    ls_ileti-id         = 'ZFORCODE_DBS'.
+    ls_ileti-number     = '002'.
+    ls_ileti-message_v1 = c_eftkd.
+    APPEND ls_ileti TO et_ileti.
+    lo_log->add_log_bapiret2( ls_ileti ). CLEAR ls_ileti.
+  ENDIF.
+
+* İnput Parametreleri
+*ls_input-limit_sorgu-dbs_no = ls_banka-
+
+
+  ls_input-fatura-kullanici_adi      = ls_banka-uname.
+  ls_input-fatura-sifre              = ls_banka-upass.
+
+
+
+  SELECT SINGLE banrf FROM ZFORCODE_DBS_t_006
+    INTO ls_input-fatura-dbs_no
+    WHERE kunnr EQ is_fatura-kunnr
+      AND bukrs EQ is_fatura-bukrs
+      AND hbkid EQ ls_banka-hbkid.
+  IF sy-subrc NE 0.
+    CALL FUNCTION 'CONVERSION_EXIT_ALPHA_OUTPUT'
+      EXPORTING
+        input  = is_fatura-kunnr
+      IMPORTING
+        output = is_fatura-kunnr.
+    ls_input-fatura-dbs_no = is_fatura-kunnr.
+  ENDIF.
+
+
+  ls_input-fatura-islem_tipi         = 'U'.
+  ls_input-fatura-fatura_no          = is_fatura-xblnr.
+  ls_input-fatura-fatura_tarihi      = YCL_FORCODE_DBS_bank_genel=>tarih_donusturme(
+                                       iv_tarih_tip  = '1'  iv_tarih = is_fatura-bldat ).
+  ls_input-fatura-pesin_para_birimi  = YCL_FORCODE_DBS_bank_genel=>para_birimi_donustur( iv_hbkid   = is_fatura-hbkid
+                                                                                     iv_saptows = 'X'
+                                                                                     iv_waers   = is_fatura-waers ).
+  ls_input-fatura-vadeli_para_birimi = YCL_FORCODE_DBS_bank_genel=>para_birimi_donustur( iv_hbkid   = is_fatura-hbkid
+                                                                                     iv_saptows = 'X'
+                                                                                     iv_waers   = is_fatura-waers ).
+
+  IF is_fatura-bldat EQ is_fatura-vddat.
+*  Peşin fatura ise..
+    ls_input-fatura-fatura_tipi = '0'.
+    ls_input-fatura-pesin_tutar  = is_fatura-wrbtr.
+    ls_input-fatura-vadeli_tutar = '0.00'.
+  ELSE .
+*  Vadeli fatura ise..
+    ls_input-fatura-fatura_tipi  = '1'.
+    ls_input-fatura-vade_tarihi  = YCL_FORCODE_DBS_bank_genel=>tarih_donusturme(
+                                   iv_tarih_tip  = '1'  iv_tarih = is_fatura-vddat ).
+    ls_input-fatura-vadeli_tutar = is_fatura-wrbtr.
+    ls_input-fatura-pesin_tutar  = '0.00'.
+  ENDIF.
+
+  CONDENSE: ls_input-fatura-pesin_tutar,
+            ls_input-fatura-vadeli_tutar.
+
+
+  TRY.
+      CALL METHOD lo_proxy->fatura_yukle
+        EXPORTING
+          input  = ls_input
+        IMPORTING
+          output = ls_output.
+    CATCH cx_ai_system_fault INTO lx_sys_fault .
+      _catch_error lx_sys_fault.
+    CATCH cx_ai_application_fault INTO lx_app_fault .
+      _catch_error lx_app_fault.
+  ENDTRY.
+
+  IF ev_dnskd EQ 0.
+    IF ls_output-fatura_yukle_result-cevap_kodu NE '0'.
+      ev_dnskd = 8.
+      ls_ileti-type       = 'E'.
+      ls_ileti-id         = 'ZFORCODE_DBS'.
+      ls_ileti-number     = '016'.
+      ls_ileti-message_v1 = ls_output-fatura_yukle_result-cevap_kodu.
+      ls_ileti-message_v2 = ls_output-fatura_yukle_result-cevap_mesaji.
+      APPEND ls_ileti TO et_ileti.
+      lo_log->add_log_bapiret2( ls_ileti ). CLEAR ls_ileti.
+    ELSE.
+      ls_ileti-type       = 'S'.
+      ls_ileti-id         = 'ZFORCODE_DBS'.
+      ls_ileti-number     = '016'.
+      ls_ileti-message_v1 = ls_output-fatura_yukle_result-cevap_kodu.
+      ls_ileti-message_v2 = ls_output-fatura_yukle_result-cevap_mesaji.
+      APPEND ls_ileti TO et_ileti.
+      lo_log->add_log_bapiret2( ls_ileti ). CLEAR ls_ileti.
+
+      MOVE-CORRESPONDING is_fatura TO es_fatura.
+
+    ENDIF.
+  ENDIF.
+
+
+*-- Mesajların listelenmesi
+  LOOP AT et_ileti INTO ls_ileti.
+    CALL FUNCTION 'BALW_BAPIRETURN_GET2'
+      EXPORTING
+        type       = ls_ileti-type
+        cl         = ls_ileti-id
+        number     = ls_ileti-number
+        par1       = ls_ileti-message_v1
+        par2       = ls_ileti-message_v2
+        par3       = ls_ileti-message_v3
+        par4       = ls_ileti-message_v4
+*       LOG_NO     = ' '
+*       LOG_MSG_NO = ' '
+*       PARAMETER  = ' '
+*       ROW        = 0
+*       FIELD      = ' '
+      IMPORTING
+        return     = ls_ileti.
+    MODIFY et_ileti FROM ls_ileti.
+  ENDLOOP.
+*
+*  lo_log->add_log( iv_msgid = 'ZFORCODE_DBS'
+*                   iv_msgty = 'S'
+*                   iv_msgno = '007'
+*                   iv_msgv1 = 'ZRT - Fatura Güncelle' ).
+
+  RAISE EVENT yif_forcode_dbs_bank~method_end
+    EXPORTING
+      io_logger = lo_log
+      iv_params = ''.
+
+ENDMETHOD.
+
+
+METHOD yif_forcode_dbs_bank~fatura_iptal.
+  DATA :
+        lo_proxy  TYPE REF TO ZFORCODE_DBS_zrt_co_dbsproxy_wssoa,
+        ls_input  TYPE ZFORCODE_DBS_zrt_fatura_yukle_soa1,
+        ls_output TYPE ZFORCODE_DBS_zrt_fatura_yukle_soap,
+*      lt_message TYPE ZFORCODE_DBS_ing_data_table1_tab,
+*      ls_message TYPE ZFORCODE_DBS_ing_data_table1,
+*      lt_detail TYPE ZFORCODE_DBS_ZRT_LIMIT_CEVAP,
+        ls_detail TYPE ZFORCODE_DBS_zrt_fatura_cevap,
+        lx_sys_fault  TYPE REF TO cx_ai_system_fault,
+        lx_app_fault  TYPE REF TO cx_ai_application_fault.
+
+*  DATA: ls_invoice TYPE ty_invoice,
+*        ev_dnskd   TYPE i,
+*        et_ileti   TYPE bapiret2_t ,
+*
+  DATA: ls_banka   TYPE ZFORCODE_DBS_s_002,
+        ls_ileti   TYPE bapiret2.
+
+  DATA:
+    lo_log   TYPE REF TO YCL_FORCODE_DBS_logger,
+    lv_msg   TYPE bapiret2-message,
+    lv_wrbtr_c TYPE char16.
+
+  DEFINE _catch_error.
+    ev_dnskd = 4.
+    ls_ileti-type       = 'E'.
+    ls_ileti-id         = 'ZFORCODE_DBS'.
+    ls_ileti-number     = '001'.
+
+    clear lv_msg.
+    lv_msg = &1->get_text( ).
+    ls_ileti-message_v1 = lv_msg+000(050).
+    ls_ileti-message_v2 = lv_msg+050(050).
+    ls_ileti-message_v3 = lv_msg+100(050).
+    ls_ileti-message_v4 = lv_msg+150(050).
+    append ls_ileti to et_ileti.
+    lo_log->add_log_bapiret2( ls_ileti ). clear ls_ileti.
+  END-OF-DEFINITION.
+
+
+
+
+  CREATE OBJECT lo_log
+    EXPORTING
+      i_subobj = 'ZFORCODE_DBS'.
+
+*  lo_log->create_log( ).
+*
+*  lo_log->add_log( iv_msgid = 'ZFORCODE_DBS'
+*                   iv_msgty = 'S'
+*                   iv_msgno = '006'
+*                   iv_msgv1 = 'ZRT - Fatura Iptal' ).
+  CLEAR:
+   lv_msg,
+   lv_wrbtr_c.
+  WRITE is_fatura-wrbtr TO lv_wrbtr_c CURRENCY is_fatura-waers.
+  CONDENSE lv_wrbtr_c.
+  CONCATENATE 'BUKRS:' is_fatura-bukrs '; '
+              'HBKID:' is_fatura-hbkid '; '
+              'KUNNR:' is_fatura-kunnr '; '
+              'XBLNR:' is_fatura-xblnr '; '
+              'BLDAT:' is_fatura-blart '; '
+              'VDDAT:' is_fatura-vddat '; '
+              'WRBTR:' lv_wrbtr_c      '; '
+              'WAERS:' is_fatura-waers '.'
+         INTO lv_msg RESPECTING BLANKS.
+
+  RAISE EVENT yif_forcode_dbs_bank~method_start
+    EXPORTING
+      io_logger = lo_log
+      iv_params = lv_msg.
+
+
+
+
+
+  CREATE OBJECT lo_proxy.
+  CHECK lo_proxy IS BOUND.
+
+  ls_banka = YCL_FORCODE_DBS_bank_genel=>banka_bilgisi(
+      iv_bukrs  = is_fatura-bukrs
+      iv_eftkd  = c_eftkd
+      iv_frmkd  = '' ).
+
+  IF ls_banka-eftkd IS INITIAL.
+    ls_ileti-type       = 'E'.
+    ls_ileti-id         = 'ZFORCODE_DBS'.
+    ls_ileti-number     = '002'.
+    ls_ileti-message_v1 = c_eftkd.
+    APPEND ls_ileti TO et_ileti.
+    lo_log->add_log_bapiret2( ls_ileti ). CLEAR ls_ileti.
+  ENDIF.
+
+
+* İnput Parametreleri
+  ls_input-fatura-kullanici_adi      = ls_banka-uname.
+  ls_input-fatura-sifre              = ls_banka-upass.
+
+  SELECT SINGLE banrf
+    FROM ZFORCODE_DBS_t_006
+    INTO ls_input-fatura-dbs_no
+    WHERE kunnr EQ is_fatura-kunnr
+      AND bukrs EQ is_fatura-bukrs
+      AND hbkid EQ ls_banka-hbkid.
+  IF sy-subrc NE 0.
+    CALL FUNCTION 'CONVERSION_EXIT_ALPHA_OUTPUT'
+      EXPORTING
+        input  = is_fatura-kunnr
+      IMPORTING
+        output = is_fatura-kunnr.
+    ls_input-fatura-dbs_no = is_fatura-kunnr.
+  ENDIF.
+
+
+  ls_input-fatura-islem_tipi         = 'D'.
+  ls_input-fatura-fatura_no          = is_fatura-xblnr.
+  ls_input-fatura-fatura_tarihi      = YCL_FORCODE_DBS_bank_genel=>tarih_donusturme(
+                                       iv_tarih_tip  = '1'  iv_tarih = is_fatura-bldat ).
+  ls_input-fatura-pesin_para_birimi  = YCL_FORCODE_DBS_bank_genel=>para_birimi_donustur( iv_hbkid   = is_fatura-hbkid
+                                                                                     iv_saptows = 'X'
+                                                                                     iv_waers   = is_fatura-waers ).
+  ls_input-fatura-vadeli_para_birimi = YCL_FORCODE_DBS_bank_genel=>para_birimi_donustur( iv_hbkid   = is_fatura-hbkid
+                                                                                     iv_saptows = 'X'
+                                                                                     iv_waers   = is_fatura-waers ).
+  IF is_fatura-bldat EQ is_fatura-vddat.
+*  Peşin fatura ise..
+    ls_input-fatura-fatura_tipi = '0'.
+    ls_input-fatura-pesin_tutar  = is_fatura-wrbtr.
+    ls_input-fatura-vadeli_tutar = '0.00'.
+  ELSE .
+*  Vadeli fatura ise..
+    ls_input-fatura-fatura_tipi  = '1'.
+    ls_input-fatura-vade_tarihi  = YCL_FORCODE_DBS_bank_genel=>tarih_donusturme(
+                                   iv_tarih_tip  = '1'  iv_tarih = is_fatura-vddat ).
+    ls_input-fatura-vadeli_tutar = is_fatura-wrbtr.
+    ls_input-fatura-pesin_tutar  = '0.00'.
+  ENDIF.
+
+  CONDENSE: ls_input-fatura-pesin_tutar,
+            ls_input-fatura-vadeli_tutar.
+
+  TRY.
+      CALL METHOD lo_proxy->fatura_yukle
+        EXPORTING
+          input  = ls_input
+        IMPORTING
+          output = ls_output.
+    CATCH cx_ai_system_fault INTO lx_sys_fault .
+      _catch_error lx_sys_fault.
+    CATCH cx_ai_application_fault INTO lx_app_fault .
+      _catch_error lx_app_fault.
+  ENDTRY.
+
+  IF ev_dnskd EQ 0.
+    IF ls_output-fatura_yukle_result-cevap_kodu NE '0'.
+      ev_dnskd = 8.
+      ls_ileti-type       = 'E'.
+      ls_ileti-id         = 'ZFORCODE_DBS'.
+      ls_ileti-number     = '016'.
+      ls_ileti-message_v1    = ls_output-fatura_yukle_result-cevap_kodu.
+      ls_ileti-message_v2    = ls_output-fatura_yukle_result-cevap_mesaji.
+      APPEND ls_ileti TO et_ileti.
+      lo_log->add_log_bapiret2( ls_ileti ). CLEAR ls_ileti.
+    ELSE.
+      ls_ileti-type       = 'S'.
+      ls_ileti-id         = 'ZFORCODE_DBS'.
+      ls_ileti-number     = '016'.
+      ls_ileti-message_v1    = ls_output-fatura_yukle_result-cevap_kodu.
+      ls_ileti-message_v2    = ls_output-fatura_yukle_result-cevap_mesaji.
+      APPEND ls_ileti TO et_ileti.
+      lo_log->add_log_bapiret2( ls_ileti ). CLEAR ls_ileti.
+
+      MOVE-CORRESPONDING is_fatura TO es_fatura.
+      es_fatura-bank = ''.
+
+    ENDIF.
+  ENDIF.
+
+
+
+*-- Mesajların listelenmesi
+  LOOP AT et_ileti INTO ls_ileti.
+    CALL FUNCTION 'BALW_BAPIRETURN_GET2'
+      EXPORTING
+        type       = ls_ileti-type
+        cl         = ls_ileti-id
+        number     = ls_ileti-number
+        par1       = ls_ileti-message_v1
+        par2       = ls_ileti-message_v2
+        par3       = ls_ileti-message_v3
+        par4       = ls_ileti-message_v4
+*       LOG_NO     = ' '
+*       LOG_MSG_NO = ' '
+*       PARAMETER  = ' '
+*       ROW        = 0
+*       FIELD      = ' '
+      IMPORTING
+        return     = ls_ileti.
+    MODIFY et_ileti FROM ls_ileti.
+  ENDLOOP.
+
+*  lo_log->add_log( iv_msgid = 'ZFORCODE_DBS'
+*                   iv_msgty = 'S'
+*                   iv_msgno = '007'
+*                   iv_msgv1 = 'ZRT - Fatura İptal' ).
+
+  RAISE EVENT yif_forcode_dbs_bank~method_end
+    EXPORTING
+      io_logger = lo_log
+      iv_params = ''.
+
+
+ENDMETHOD.
+
+
+METHOD yif_forcode_dbs_bank~fatura_kaydet.
+
+  DATA:
+     lo_proxy  TYPE REF TO ZFORCODE_DBS_zrt_co_dbsproxy_wssoa,
+     ls_input  TYPE ZFORCODE_DBS_zrt_fatura_yukle_soa1,
+     ls_output TYPE ZFORCODE_DBS_zrt_fatura_yukle_soap,
+*     lt_message TYPE ZFORCODE_DBS_ing_data_table1_tab,
+*     ls_message TYPE ZFORCODE_DBS_ing_data_table1,
+*     lt_detail TYPE ZFORCODE_DBS_ZRT_LIMIT_CEVAP,
+     ls_detail TYPE ZFORCODE_DBS_zrt_fatura_cevap,
+     lx_sys_fault  TYPE REF TO cx_ai_system_fault,
+     lx_app_fault  TYPE REF TO cx_ai_application_fault.
+
+*  DATA: ls_invoice TYPE ty_invoice,
+*        ev_dnskd   TYPE i,
+*        et_ileti   TYPE bapiret2_t ,
+*
+  DATA: ls_banka   TYPE ZFORCODE_DBS_s_002,
+        ls_ileti   TYPE bapiret2.
+
+  DATA:
+    lo_log      TYPE REF TO YCL_FORCODE_DBS_logger,
+    lv_msg      TYPE bapiret2-message,
+    lv_wrbtr_c  TYPE char16.
+
+  DEFINE _catch_error.
+    ev_dnskd = 4.
+    ls_ileti-type       = 'E'.
+    ls_ileti-id         = 'ZFORCODE_DBS'.
+    ls_ileti-number     = '001'.
+
+    clear lv_msg.
+    lv_msg = &1->get_text( ).
+    ls_ileti-message_v1 = lv_msg+000(050).
+    ls_ileti-message_v2 = lv_msg+050(050).
+    ls_ileti-message_v3 = lv_msg+100(050).
+    ls_ileti-message_v4 = lv_msg+150(050).
+    append ls_ileti to et_ileti.
+    lo_log->add_log_bapiret2( ls_ileti ). clear ls_ileti.
+  END-OF-DEFINITION.
+
+
+
+
+
+
+  CREATE OBJECT lo_log
+    EXPORTING
+      i_subobj = 'ZFORCODE_DBS'.
+
+*  lo_log->create_log( ).
+*
+*  lo_log->add_log( iv_msgid = 'ZFORCODE_DBS'
+*                   iv_msgty = 'S'
+*                   iv_msgno = '006'
+*                   iv_msgv1 = 'ZRT - Fatura Kaydet' ).
+
+  CLEAR:
+   lv_msg,
+   lv_wrbtr_c.
+  WRITE is_fatura-wrbtr TO lv_wrbtr_c CURRENCY is_fatura-waers.
+  CONDENSE lv_wrbtr_c.
+  CONCATENATE 'BUKRS:' is_fatura-bukrs '; '
+              'HBKID:' is_fatura-hbkid '; '
+              'KUNNR:' is_fatura-kunnr '; '
+              'XBLNR:' is_fatura-xblnr '; '
+              'BLDAT:' is_fatura-blart '; '
+              'VDDAT:' is_fatura-vddat '; '
+              'WRBTR:' lv_wrbtr_c      '; '
+              'WAERS:' is_fatura-waers '.'
+         INTO lv_msg RESPECTING BLANKS.
+
+  RAISE EVENT yif_forcode_dbs_bank~method_start
+    EXPORTING
+      io_logger = lo_log
+      iv_params = lv_msg.
+
+
+  CREATE OBJECT lo_proxy.
+  CHECK lo_proxy IS BOUND.
+
+  ls_banka = YCL_FORCODE_DBS_bank_genel=>banka_bilgisi(
+      iv_bukrs  = is_fatura-bukrs
+      iv_eftkd  = c_eftkd
+      iv_frmkd  = '' ).
+
+  IF ls_banka-eftkd IS INITIAL.
+    ls_ileti-type       = 'E'.
+    ls_ileti-id         = 'ZFORCODE_DBS'.
+    ls_ileti-number     = '002'.
+    ls_ileti-message_v1 = c_eftkd.
+    APPEND ls_ileti TO et_ileti.
+    lo_log->add_log_bapiret2( ls_ileti ). CLEAR ls_ileti.
+  ENDIF.
+
+* İnput Parametreleri
+  ls_input-fatura-kullanici_adi      = ls_banka-uname.
+  ls_input-fatura-sifre              = ls_banka-upass.
+
+
+*  IF ls_banka-testf IS NOT INITIAL.
+  SELECT SINGLE banrf FROM ZFORCODE_DBS_t_006
+    INTO ls_input-fatura-dbs_no
+    WHERE kunnr EQ is_fatura-kunnr
+      AND bukrs EQ is_fatura-bukrs
+      AND hbkid EQ ls_banka-hbkid.
+  IF sy-subrc NE 0.
+    CALL FUNCTION 'CONVERSION_EXIT_ALPHA_OUTPUT'
+      EXPORTING
+        input  = is_fatura-kunnr
+      IMPORTING
+        output = is_fatura-kunnr.
+    ls_input-fatura-dbs_no = is_fatura-kunnr.
+  ENDIF.
+*  ENDIF.
+
+
+  ls_input-fatura-islem_tipi         = 'A'.
+  ls_input-fatura-fatura_no          = is_fatura-xblnr.
+  ls_input-fatura-fatura_tarihi      = YCL_FORCODE_DBS_bank_genel=>tarih_donusturme(
+                                       iv_tarih_tip  = '1'  iv_tarih = is_fatura-bldat ).
+  ls_input-fatura-pesin_para_birimi  = YCL_FORCODE_DBS_bank_genel=>para_birimi_donustur( iv_hbkid   = is_fatura-hbkid
+                                                                                     iv_saptows = 'X'
+                                                                                     iv_waers   = is_fatura-waers ).
+  ls_input-fatura-vadeli_para_birimi = YCL_FORCODE_DBS_bank_genel=>para_birimi_donustur( iv_hbkid   = is_fatura-hbkid
+                                                                                     iv_saptows = 'X'
+                                                                                     iv_waers   = is_fatura-waers ).
+
+  IF is_fatura-bldat EQ is_fatura-vddat.
+*  Peşin fatura ise..
+    ls_input-fatura-fatura_tipi = '0'.
+    ls_input-fatura-pesin_tutar  = is_fatura-wrbtr.
+    ls_input-fatura-vadeli_tutar = '0.00'.
+  ELSE .
+*  Vadeli fatura ise..
+    ls_input-fatura-fatura_tipi  = '1'.
+    ls_input-fatura-vade_tarihi  = YCL_FORCODE_DBS_bank_genel=>tarih_donusturme(
+                                   iv_tarih_tip  = '1'  iv_tarih = is_fatura-vddat ).
+    ls_input-fatura-vadeli_tutar = is_fatura-wrbtr.
+    ls_input-fatura-pesin_tutar  = '0.00'.
+  ENDIF.
+
+  CONDENSE: ls_input-fatura-pesin_tutar,
+            ls_input-fatura-vadeli_tutar.
+
+
+
+
+
+  TRY.
+      CALL METHOD lo_proxy->fatura_yukle
+        EXPORTING
+          input  = ls_input
+        IMPORTING
+          output = ls_output.
+    CATCH cx_ai_system_fault INTO lx_sys_fault .
+      _catch_error lx_sys_fault.
+    CATCH cx_ai_application_fault INTO lx_app_fault .
+      _catch_error lx_app_fault.
+  ENDTRY.
+
+  IF ev_dnskd EQ 0.
+    IF ls_output-fatura_yukle_result-cevap_kodu NE '0'.
+      ev_dnskd = 8.
+      ls_ileti-type       = 'E'.
+      ls_ileti-id         = 'ZFORCODE_DBS'.
+      ls_ileti-number     = '016'.
+      ls_ileti-message_v1    = ls_output-fatura_yukle_result-cevap_kodu.
+      ls_ileti-message_v2    = ls_output-fatura_yukle_result-cevap_mesaji.
+      APPEND ls_ileti TO et_ileti.
+      lo_log->add_log_bapiret2( ls_ileti ). CLEAR ls_ileti.
+    ELSE.
+      ls_ileti-type       = 'S'.
+      ls_ileti-id         = 'ZFORCODE_DBS'.
+      ls_ileti-number     = '016'.
+      ls_ileti-message_v1    = ls_output-fatura_yukle_result-cevap_kodu.
+      ls_ileti-message_v2    = ls_output-fatura_yukle_result-cevap_mesaji.
+      APPEND ls_ileti TO et_ileti.
+      lo_log->add_log_bapiret2( ls_ileti ). CLEAR ls_ileti.
+
+      MOVE-CORRESPONDING is_fatura TO es_fatura.
+      es_fatura-bank = 'X'.
+
+    ENDIF.
+  ENDIF.
+
+
+
+  CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+    EXPORTING
+      input  = is_fatura-kunnr
+    IMPORTING
+      output = is_fatura-kunnr.
+
+
+
+*-- Mesajların listelenmesi
+  LOOP AT et_ileti INTO ls_ileti.
+    CALL FUNCTION 'BALW_BAPIRETURN_GET2'
+      EXPORTING
+        type       = ls_ileti-type
+        cl         = ls_ileti-id
+        number     = ls_ileti-number
+        par1       = ls_ileti-message_v1
+        par2       = ls_ileti-message_v2
+        par3       = ls_ileti-message_v3
+        par4       = ls_ileti-message_v4
+*       LOG_NO     = ' '
+*       LOG_MSG_NO = ' '
+*       PARAMETER  = ' '
+*       ROW        = 0
+*       FIELD      = ' '
+      IMPORTING
+        return     = ls_ileti.
+    MODIFY et_ileti FROM ls_ileti.
+  ENDLOOP.
+
+*  lo_log->add_log( iv_msgid = 'ZFORCODE_DBS'
+*                   iv_msgty = 'S'
+*                   iv_msgno = '007'
+*                   iv_msgv1 = 'ZRT - Fatura Kaydet' ).
+  RAISE EVENT yif_forcode_dbs_bank~method_end
+    EXPORTING
+      io_logger = lo_log
+      iv_params = ''.
+
+ENDMETHOD.
+
+
+METHOD yif_forcode_dbs_bank~sorgula_limit.
+  TYPE-POOLS sai.
+
+  TYPES: BEGIN OF ty_kunnr,
+        kunnr TYPE kna1-kunnr,
+       END OF ty_kunnr.
+
+  DATA:
+     lo_proxy  TYPE REF TO ZFORCODE_DBS_zrt_co_dbsproxy_wssoa,
+     ls_input  TYPE ZFORCODE_DBS_zrt_limit_sorgulama_2,
+     ls_output TYPE ZFORCODE_DBS_zrt_limit_sorgulama_s,
+     ls_input_bayi  TYPE ZFORCODE_DBS_zrt_bayi_bilgi_sorgu1,
+     ls_output_bayi TYPE ZFORCODE_DBS_zrt_bayi_bilgi_sorgul,
+     lt_bayi_bilgi TYPE ZFORCODE_DBS_zrt_bayi_bilgi_tab,
+     ls_bayi_bilgi TYPE ZFORCODE_DBS_zrt_bayi_bilgi,
+*     lt_message TYPE ZFORCODE_DBS_ing_data_table1_tab,
+*     ls_message TYPE ZFORCODE_DBS_ing_data_table1,
+     lt_detail TYPE ZFORCODE_DBS_zrt_limit_cevap,
+     ls_detail TYPE ZFORCODE_DBS_zrt_limit_cevap,
+     lx_sys_fault  TYPE REF TO cx_ai_system_fault,
+     lx_app_fault  TYPE REF TO cx_ai_application_fault,
+     lo_prot       TYPE REF TO if_wsprotocol_payload,
+     ls_control    TYPE prxctrl.
+
+*  DATA: ev_dnskd   TYPE i,
+*        et_ileti   TYPE bapiret2_t ,
+
+  DATA: ls_banka   TYPE ZFORCODE_DBS_s_002,
+        ls_ileti   TYPE bapiret2,
+        ls_limit   TYPE ZFORCODE_DBS_t_004,
+        lv_kunnr   TYPE kna1-kunnr.
+
+  DATA: lt_kunnr TYPE TABLE OF ty_kunnr.
+  DATA : ls_kunnr TYPE  ty_kunnr.
+
+
+  DATA:
+    lo_log      TYPE REF TO YCL_FORCODE_DBS_logger,
+    lv_msg      TYPE bapiret2-message.
+
+  DEFINE _catch_error.
+    ev_dnskd = 4.
+    ls_ileti-type       = 'E'.
+    ls_ileti-id         = 'ZFORCODE_DBS'.
+    ls_ileti-number     = '001'.
+
+    clear lv_msg.
+    lv_msg = &1->get_text( ).
+    ls_ileti-message_v1 = lv_msg+000(050).
+    ls_ileti-message_v2 = lv_msg+050(050).
+    ls_ileti-message_v3 = lv_msg+100(050).
+    ls_ileti-message_v4 = lv_msg+150(050).
+    append ls_ileti to et_ileti.
+    lo_log->add_log_bapiret2( ls_ileti ). clear ls_ileti.
+  END-OF-DEFINITION.
+
+
+
+  CREATE OBJECT lo_log
+    EXPORTING
+      i_subobj = 'ZFORCODE_DBS'.
+
+*  lo_log->create_log( ).
+*
+*  lo_log->add_log( iv_msgid = 'ZFORCODE_DBS'
+*                   iv_msgty = 'S'
+*                   iv_msgno = '006'
+*                   iv_msgv1 = 'ZRT - LIMIT SORGULA' ).
+  CLEAR:
+   lv_msg.
+  CONCATENATE 'BUKRS:' is_limit-bukrs '; '
+              'HBKID:' is_limit-hbkid '; '
+              'KUNNR:' is_limit-kunnr '.'
+         INTO lv_msg RESPECTING BLANKS.
+
+  RAISE EVENT yif_forcode_dbs_bank~method_start
+    EXPORTING
+      io_logger = lo_log
+      iv_params = lv_msg.
+
+
+  ls_banka = YCL_FORCODE_DBS_bank_genel=>banka_bilgisi(
+      iv_bukrs  = is_limit-bukrs
+      iv_eftkd  = c_eftkd
+      iv_frmkd  = '' ).
+
+  IF ls_banka-eftkd IS INITIAL.
+    ls_ileti-type       = 'E'.
+    ls_ileti-id         = 'ZFORCODE_DBS'.
+    ls_ileti-number     = '002'.
+    ls_ileti-message_v1 = c_eftkd.
+    APPEND ls_ileti TO et_ileti.
+    lo_log->add_log_bapiret2( ls_ileti ). CLEAR ls_ileti.
+  ELSE.
+
+
+
+*-> begin - ETUNC / 23.01.2021
+*-- bayiler servisten alınır
+** Müşteriler tablodan çekilir
+*    SELECT kunnr FROM zfi_t_dtskna1
+*     INTO TABLE lt_kunnr
+*     WHERE bukrs EQ ls_banka-bukrs
+*       AND hbkıd EQ ls_banka-hbkid.
+
+    TRY.
+
+        CREATE OBJECT lo_proxy.
+        CHECK lo_proxy IS BOUND.
+
+
+        lo_prot ?= lo_proxy->get_protocol( if_wsprotocol=>payload ).
+        lo_prot->set_extended_xml_handling( abap_true ).
+
+
+
+        CLEAR:
+          ls_input_bayi,
+          ls_output_bayi.
+
+        ls_input_bayi-bayi_bilgi_istek-kullanici_adi = ls_banka-uname.
+        ls_input_bayi-bayi_bilgi_istek-sifre         = ls_banka-upass.
+
+        ls_control-field = 'DBS_NO'.
+        ls_control-value = sai_ctrl_initial.
+        APPEND ls_control TO ls_input_bayi-bayi_bilgi_istek-controller.
+
+
+
+        CALL METHOD lo_proxy->bayi_bilgi_sorgula
+          EXPORTING
+            input  = ls_input_bayi
+          IMPORTING
+            output = ls_output_bayi.
+
+        lt_bayi_bilgi = ls_output_bayi-bayi_bilgi_sorgula_result-bayi_bilgileri-bayi_bilgi.
+
+        IF ls_output_bayi-bayi_bilgi_sorgula_result-cevap_kodu NE 0 .
+          ev_dnskd = 8.
+          ls_ileti-type       = 'E'.
+          ls_ileti-id         = 'ZFORCODE_DBS'.
+          ls_ileti-number     = '016'.
+          ls_ileti-message_v1 = ls_output_bayi-bayi_bilgi_sorgula_result-cevap_kodu.
+          ls_ileti-message_v2 = ls_output_bayi-bayi_bilgi_sorgula_result-cevap_mesaji.
+          APPEND ls_ileti TO et_ileti.
+          lo_log->add_log_bapiret2(  ls_ileti ). CLEAR ls_ileti.
+        ELSE.
+          SORT lt_bayi_bilgi[] by dbs_no.
+          DELETE ADJACENT DUPLICATES FROM lt_Bayi_Bilgi COMPARING dbs_no.
+        ENDIF.
+
+
+      CATCH cx_ai_system_fault INTO lx_sys_fault .
+        _catch_error lx_sys_fault.
+      CATCH cx_ai_application_fault INTO lx_app_fault .
+        _catch_error lx_app_fault.
+    ENDTRY.
+*<- end   - ETUNC / 23.01.2021
+
+
+
+* İnput Parametreleri
+*ls_input-limit_sorgu-dbs_no = ls_banka-
+
+*    LOOP AT lt_kunnr INTO ls_kunnr.
+    LOOP AT lt_bayi_bilgi INTO ls_bayi_bilgi.
+      CLEAR:
+        ls_output.
+
+      ls_input-limit_sorgu-kullanici_adi = ls_banka-uname.
+      ls_input-limit_sorgu-sifre         = ls_banka-upass.
+
+      ls_input-limit_sorgu-dbs_no        = ls_bayi_bilgi-dbs_no.
+
+*      SELECT SINGLE banrf FROM ZFORCODE_DBS_t_006
+*        INTO ls_input-limit_sorgu-dbs_no
+*        WHERE kunnr EQ ls_kunnr-kunnr
+*          AND bukrs EQ ls_banka-bukrs
+*          AND hbkid EQ ls_banka-hbkid.
+*      IF sy-subrc NE 0.
+*        CALL FUNCTION 'CONVERSION_EXIT_ALPHA_OUTPUT'
+*          EXPORTING
+*            input  = ls_kunnr-kunnr
+*          IMPORTING
+*            output = ls_input-limit_sorgu-dbs_no.
+*        CONDENSE ls_input-limit_sorgu-dbs_no.
+*      ENDIF.
+
+
+      TRY.
+          CALL METHOD lo_proxy->limit_sorgulama
+            EXPORTING
+              input  = ls_input
+            IMPORTING
+              output = ls_output.
+        CATCH cx_ai_system_fault INTO lx_sys_fault .
+          _catch_error lx_sys_fault.
+        CATCH cx_ai_application_fault INTO lx_app_fault .
+          _catch_error lx_app_fault.
+      ENDTRY.
+
+      IF ls_output-limit_sorgulama_result-cevap_kodu EQ 0.
+
+        SELECT SINGLE kunnr FROM ZFORCODE_DBS_t_006
+          INTO ls_limit-kunnr
+          WHERE banrf EQ ls_bayi_bilgi-dbs_no
+            AND bukrs EQ ls_banka-bukrs
+            AND hbkid EQ ls_banka-hbkid.
+        IF sy-subrc NE 0.
+          ls_limit-kunnr = ls_bayi_bilgi-dbs_no.
+          CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+            EXPORTING
+              input  = ls_limit-kunnr
+            IMPORTING
+              output = ls_limit-kunnr.
+        ENDIF.
+
+*        CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+*          EXPORTING
+*            input  = ls_kunnr-kunnr
+*          IMPORTING
+*            output = ls_kunnr-kunnr.
+
+
+        ls_limit-bukrs    = ls_banka-bukrs.
+        ls_limit-hbkid    = ls_banka-hbkid.
+*        ls_limit-kunnr    = ls_kunnr-kunnr.
+        ls_limit-bnlimit  = ls_output-limit_sorgulama_result-toplam_limit.
+        ls_limit-kklimit  = ls_output-limit_sorgulama_result-kullanilabilir_limit.
+*      ls_limit-kllimit  = ls_output-limit_sorgulama_result-kullanilabilir_limit.
+        ls_limit-kllimit  = ls_output-limit_sorgulama_result-toplam_limit - ls_output-limit_sorgulama_result-toplam_nakdi_risk .
+        IF ls_limit-kllimit LT 0.
+          ls_limit-kllimit = 0.
+        ENDIF.
+        ls_limit-vglimit  = ls_output-limit_sorgulama_result-gayri_nakdi_risk.
+        APPEND ls_limit TO et_limit.
+      ELSE.
+*      ev_dnskd = 4. " diğer müşteriler gelebilir.
+        ls_ileti-type       = 'E'.
+        ls_ileti-id         = 'ZFORCODE_DBS'.
+        ls_ileti-number     = '019'.
+        ls_ileti-message_v1 = ls_bayi_bilgi-dbs_no.
+        ls_ileti-message_v2 = ls_output-limit_sorgulama_result-cevap_kodu.
+        ls_ileti-message_v3 = ls_output-limit_sorgulama_result-cevap_mesaji.
+        APPEND ls_ileti TO et_ileti.
+        lo_log->add_log_bapiret2(  ls_ileti ). CLEAR ls_ileti.
+      ENDIF.
+
+    ENDLOOP.
+
+  ENDIF.
+
+
+
+
+*-- Mesajların listelenmesi
+  LOOP AT et_ileti INTO ls_ileti.
+    CALL FUNCTION 'BALW_BAPIRETURN_GET2'
+      EXPORTING
+        type       = ls_ileti-type
+        cl         = ls_ileti-id
+        number     = ls_ileti-number
+        par1       = ls_ileti-message_v1
+        par2       = ls_ileti-message_v2
+        par3       = ls_ileti-message_v3
+        par4       = ls_ileti-message_v4
+*       LOG_NO     = ' '
+*       LOG_MSG_NO = ' '
+*       PARAMETER  = ' '
+*       ROW        = 0
+*       FIELD      = ' '
+      IMPORTING
+        return     = ls_ileti.
+    MODIFY et_ileti FROM ls_ileti.
+  ENDLOOP.
+
+*  lo_log->add_log( iv_msgid = 'ZFORCODE_DBS'
+*                   iv_msgty = 'S'
+*                   iv_msgno = '007'
+*                   iv_msgv1 = 'ZRT - Limit Sorgulama ' ).
+  RAISE EVENT yif_forcode_dbs_bank~method_end
+    EXPORTING
+      io_logger = lo_log
+      iv_params = ''.
+
+
+ENDMETHOD.
+
+
+METHOD yif_forcode_dbs_bank~sorgula_tahsilat.
+*
+  DATA: ls_banka          TYPE ZFORCODE_DBS_s_002,
+        ls_ileti          TYPE bapiret2,
+        lo_proxy          TYPE REF TO ZFORCODE_DBS_zrt_co_dbsproxy_wssoa,
+        ls_input          TYPE ZFORCODE_DBS_zrt_fatura_sorgula_s1,
+        ls_output         TYPE ZFORCODE_DBS_zrt_fatura_sorgula_so,
+*        lt_datatable      TYPE ZFORCODE_DBS_ZRT_FATURA_SORGU__TAB,
+*        ls_datatable      TYPE ZFORCODE_DBS_ZRT_FATURA_SORGU_CEVA,
+        lt_invoice        TYPE ZFORCODE_DBS_zrt_fatura_sorgu__tab,
+        ls_invoice        TYPE ZFORCODE_DBS_zrt_fatura_sorgu_ceva,
+        lv_startdate      TYPE string,
+        lv_enddate        TYPE string,
+        lt_tahsilat_temp  TYPE ZFORCODE_DBS_tt_003,
+        ls_tahsilat       TYPE ZFORCODE_DBS_s_005,
+        lx_sys_fault      TYPE REF TO cx_ai_system_fault,
+        lx_app_fault      TYPE REF TO cx_ai_application_fault,
+        lv_tahsilat_tarihi TYPE datum,
+        lv_date_temp      TYPE char10,
+        lv_time_temp      TYPE char10,
+        lv_date           TYPE char10,
+        lv_time           TYPE char10.
+
+  CLEAR ev_dnskd.
+
+  DATA:
+    lo_log   TYPE REF TO YCL_FORCODE_DBS_logger,
+    lv_msg   TYPE bapiret2-message.
+
+  CREATE OBJECT lo_log
+    EXPORTING
+      i_subobj = 'ZFORCODE_DBS'.
+
+*  lo_log->create_log( ).
+*
+*  lo_log->add_log( iv_msgid = 'ZFORCODE_DBS'
+*                   iv_msgty = 'S'
+*                   iv_msgno = '006'
+*                   iv_msgv1 = 'ZRT - TAHSILAT SORGULAMA' ).
+  CLEAR:
+   lv_msg.
+  CONCATENATE 'BUKRS:' iv_bukrs '; '
+              'KUNNR:' iv_bayin '; '
+              'DATUM_START:' iv_datum_start '; '
+              'DATUM_END:' iv_datum_end '.'
+         INTO lv_msg RESPECTING BLANKS.
+
+  RAISE EVENT yif_forcode_dbs_bank~method_start
+    EXPORTING
+      io_logger = lo_log
+      iv_params = lv_msg.
+
+
+  ls_banka = YCL_FORCODE_DBS_bank_genel=>banka_bilgisi( iv_bukrs = iv_bukrs
+                                                    iv_eftkd = c_eftkd
+                                                    iv_frmkd = '' ).
+  IF ls_banka IS INITIAL.
+    ev_dnskd = 4.
+    ls_ileti-type       = 'E'.
+    ls_ileti-id         = 'ZFORCODE_DBS'.
+    ls_ileti-number     = '002'.
+    ls_ileti-message_v1 = c_eftkd.
+    APPEND ls_ileti TO et_ileti.
+    lo_log->add_log( iv_msgid = ls_ileti-id
+                     iv_msgty = ls_ileti-type
+                     iv_msgno = ls_ileti-number
+                     iv_msgv1 = ls_ileti-message_v1 ).
+  ELSE.
+
+
+
+*
+    IF iv_datum_start IS NOT INITIAL.
+      lv_startdate = YCL_FORCODE_DBS_bank_genel=>tarih_donusturme( iv_tarih_tip = '8'
+                                                               iv_tarih     = iv_datum_start ).
+      ls_input-fatura_sorgu-baslangic_tarihi = lv_startdate.
+    ENDIF .
+
+    IF iv_datum_end IS NOT INITIAL.
+      lv_enddate = YCL_FORCODE_DBS_bank_genel=>tarih_donusturme( iv_tarih_tip = '8'
+                                                               iv_tarih     = iv_datum_end ).
+      ls_input-fatura_sorgu-bitis_tarihi = lv_enddate.
+    ELSE.
+      ls_input-fatura_sorgu-bitis_tarihi = lv_startdate.
+    ENDIF .
+
+
+* kullanıcı adı-şifre
+    ls_input-fatura_sorgu-kullanici_adi  = ls_banka-uname.
+    ls_input-fatura_sorgu-sifre          = ls_banka-upass.
+
+
+    IF iv_bayin IS NOT INITIAL.
+      SELECT SINGLE banrf FROM ZFORCODE_DBS_t_006
+        INTO ls_input-fatura_sorgu-dbs_no
+        WHERE kunnr EQ iv_bayin
+          AND bukrs EQ iv_bukrs
+          AND hbkid EQ ls_banka-hbkid.
+      IF sy-subrc NE 0.
+        CALL FUNCTION 'CONVERSION_EXIT_ALPHA_OUTPUT'
+          EXPORTING
+            input  = iv_bayin
+          IMPORTING
+            output = ls_input-fatura_sorgu-dbs_no.
+      ENDIF.
+    ENDIF.
+
+    ls_input-fatura_sorgu-tarih_tip = '1'."-1: Tarih yok 0: Fatura Tr 1:son ödeme tarihi 2:Yükleme tarihi
+
+    TRY.
+
+        CREATE OBJECT lo_proxy.
+*    EXPORTING
+*      logical_port_name  =
+
+        CALL METHOD lo_proxy->fatura_sorgula
+          EXPORTING
+            input  = ls_input
+          IMPORTING
+            output = ls_output.
+
+      CATCH cx_ai_system_fault INTO lx_sys_fault .
+        ev_dnskd = 4.
+        ls_ileti-type       = 'E'.
+        ls_ileti-id         = 'ZFORCODE_DBS'.
+        ls_ileti-number     = '001'.
+        ls_ileti-message_v1    = lx_sys_fault->get_text( ).
+        APPEND ls_ileti TO et_ileti.
+        lo_log->add_log( iv_msgid = ls_ileti-id
+                         iv_msgty = ls_ileti-type
+                         iv_msgno = ls_ileti-number
+                         iv_msgv1 = ls_ileti-message_v1 ).
+      CATCH cx_ai_application_fault INTO lx_app_fault .
+        ev_dnskd = 4.
+        ls_ileti-type       = 'E'.
+        ls_ileti-id         = 'ZFORCODE_DBS'.
+        ls_ileti-number     = '001'.
+        ls_ileti-message_v1    = lx_app_fault->get_text( ).
+        APPEND ls_ileti TO et_ileti.
+        lo_log->add_log( iv_msgid = ls_ileti-id
+                         iv_msgty = ls_ileti-type
+                         iv_msgno = ls_ileti-number
+                         iv_msgv1 = ls_ileti-message_v1 ).
+    ENDTRY.
+
+    IF ev_dnskd IS INITIAL.
+
+      lt_invoice = ls_output-fatura_sorgula_result-fatura_sorgu_cevap[].
+
+      LOOP AT lt_invoice INTO ls_invoice WHERE cevap_kodu NE 0.
+        ev_dnskd = 4.
+        ls_ileti-type       = 'E'.
+        ls_ileti-id         = 'ZFORCODE_DBS'.
+        ls_ileti-number     = '001'.
+        ls_ileti-message_v1   = ls_invoice-cevap_mesaji.
+        APPEND ls_ileti TO et_ileti.
+        lo_log->add_log( iv_msgid = ls_ileti-id
+                         iv_msgty = ls_ileti-type
+                         iv_msgno = ls_ileti-number
+                         iv_msgv1 = ls_ileti-message_v1 ).
+      ENDLOOP.
+      IF sy-subrc NE 0.
+
+        LOOP AT lt_invoice INTO ls_invoice.
+          CLEAR:
+            lv_date_temp,
+            lv_time_temp.
+
+          IF ls_invoice-kayit_zaman IS NOT INITIAL.
+            SPLIT ls_invoice-kayit_zaman AT space INTO lv_date_temp lv_time_temp.
+            lv_date = YCL_FORCODE_DBS_bank_genel=>tarih_donusturme( iv_tarih_tip = '10'
+                                                                iv_tarih     = lv_date_temp ).
+            CONCATENATE lv_time_temp(2) lv_time_temp+3(2) lv_time_temp+6(2) INTO lv_time.
+            CONCATENATE lv_date lv_time INTO ls_invoice-kayit_zaman.
+            CONDENSE  ls_invoice-kayit_zaman NO-GAPS.
+          ENDIF.
+
+          MODIFY lt_invoice FROM ls_invoice.
+        ENDLOOP.
+        SORT lt_invoice BY fatura_no kayit_zaman DESCENDING.
+        DELETE ADJACENT DUPLICATES FROM lt_invoice COMPARING fatura_no.
+
+        LOOP AT lt_invoice INTO ls_invoice.
+          CLEAR ls_tahsilat.
+          ls_tahsilat-hbkid         = ls_banka-hbkid.
+          ls_tahsilat-eftkd         = c_eftkd.
+          ls_tahsilat-bukrs         = iv_bukrs.
+
+
+          SELECT SINGLE kunnr FROM ZFORCODE_DBS_t_006
+            INTO ls_tahsilat-kunnr
+            WHERE banrf EQ ls_invoice-dbs_no
+              AND bukrs EQ ls_banka-bukrs
+              AND hbkid EQ ls_banka-hbkid.
+          IF sy-subrc NE 0.
+            ls_tahsilat-kunnr         = ls_invoice-dbs_no.
+            CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+              EXPORTING
+                input  = ls_tahsilat-kunnr
+              IMPORTING
+                output = ls_tahsilat-kunnr.
+          ENDIF.
+
+
+          ls_tahsilat-xblnr         = ls_invoice-fatura_no.
+          ls_tahsilat-wrbtr_giden   = ls_invoice-fatura_tutari.
+          CASE ls_invoice-fatura_doviz_kodu.
+            WHEN '88'.ls_tahsilat-waers_giden  = 'TRY'.
+            WHEN '1'. ls_tahsilat-waers_giden  = 'USD'.
+            WHEN '2'. ls_tahsilat-waers_giden  = 'EUR'.
+          ENDCASE.
+
+          ls_tahsilat-wrbtr_tah     = ls_invoice-tahsilat_tutari.
+          CASE ls_invoice-tahsilat_doviz_kodu.
+            WHEN '88'.ls_tahsilat-waers_tah  = 'TRY'.
+            WHEN '1'. ls_tahsilat-waers_tah  = 'USD'.
+            WHEN '2'. ls_tahsilat-waers_tah  = 'EUR'.
+          ENDCASE.
+
+          ls_tahsilat-vddat         = YCL_FORCODE_DBS_bank_genel=>tarih_donusturme( iv_tarih_tip = '10'
+                                                                                iv_tarih     = ls_invoice-son_odeme_tarihi ).
+* ileri vadeli tahsilat gelirse tahsilat tarihini al..
+          IF ls_invoice-tahsilat_tarihi NE space.
+            lv_tahsilat_tarihi  = YCL_FORCODE_DBS_bank_genel=>tarih_donusturme( iv_tarih_tip = '10'
+                                                                                  iv_tarih     = ls_invoice-tahsilat_tarihi ).
+            IF ls_tahsilat-vddat > lv_tahsilat_tarihi.
+              ls_tahsilat-vddat         = lv_tahsilat_tarihi.
+            ENDIF.
+          ENDIF.
+
+
+
+*  ftp işlem koduna dönüştürülmesi
+          IF ls_invoice-kayit_durumu EQ 'I'.
+            ls_tahsilat-islem = '85'. " iptal edildi
+          ELSE.
+            IF ls_invoice-tahsilat_tutari GT 0.
+              ls_tahsilat-islem = '91'. " fatura tahsil edildi
+            ELSE.
+              ls_tahsilat-islem = '80'. " tahsil olacak
+            ENDIF.
+          ENDIF.
+
+          APPEND ls_tahsilat TO lt_tahsilat_temp.
+        ENDLOOP.
+      ENDIF.
+
+    ENDIF.
+  ENDIF.
+
+
+  et_tahsilat = lt_tahsilat_temp.
+*-- Mesajların listelenmesi
+  LOOP AT et_ileti INTO ls_ileti.
+    CALL FUNCTION 'BALW_BAPIRETURN_GET2'
+      EXPORTING
+        type       = ls_ileti-type
+        cl         = ls_ileti-id
+        number     = ls_ileti-number
+        par1       = ls_ileti-message_v1
+        par2       = ls_ileti-message_v2
+        par3       = ls_ileti-message_v3
+        par4       = ls_ileti-message_v4
+*       LOG_NO     = ' '
+*       LOG_MSG_NO = ' '
+*       PARAMETER  = ' '
+*       ROW        = 0
+*       FIELD      = ' '
+      IMPORTING
+        return     = ls_ileti.
+    MODIFY et_ileti FROM ls_ileti.
+  ENDLOOP.
+
+*  lo_log->add_log( iv_msgid = 'ZFORCODE_DBS'
+*                   iv_msgty = 'S'
+*                   iv_msgno = '007'
+*                   iv_msgv1 = 'ZRT - TAHSILAT SORGULAMA' ).
+
+  RAISE EVENT yif_forcode_dbs_bank~method_end
+    EXPORTING
+      io_logger = lo_log
+      iv_params = ''.
+
+
+ENDMETHOD.
+ENDCLASS.
